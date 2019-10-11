@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+      type:     git
+      location: https://github.com/typeable/xml-isogen.git
+      tag: 5a2076557c45ba309c1188cec6eacbc1a225e9d2
