@@ -2,5 +2,5 @@ packages: .
 
 source-repository-package
       type:     git
-      location: https://github.com/typeable/xml-isogen.git
-      tag: 5a2076557c45ba309c1188cec6eacbc1a225e9d2
+      location: https://github.com/dredozubov/xsd-parser.git
+      tag: 1949dc25eb5e4cd179fbb1addc64bcc194f85f4f

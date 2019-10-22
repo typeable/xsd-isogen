@@ -22,5 +22,13 @@ executable xsd-isogen
   -- other-modules:
   -- other-extensions:
   build-depends:       base ^>=4.12.0.0
+                     , bytestring
+                     , containers
+                     , data-default
+                     , mtl
+                     , text
+                     , writer-cps-mtl
+                     , xsd-parser
+                     , unordered-containers
   hs-source-dirs:      src
   default-language:    Haskell2010
