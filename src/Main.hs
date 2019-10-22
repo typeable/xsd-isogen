@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -22,7 +23,7 @@ import System.IO
 import Text.XSD
 
 
-type GenMonad = StateT (M.Map Text Type) (Writer Text)
+type GenMonad = ReaderT DatatypeMap (Writer Text)
 
 class References a where
   references :: a -> [Text]
@@ -114,13 +115,17 @@ lookupDatatype ty = do
       [] -> proceed ty typ >> sortDatatypesByDeps
       xs -> traverse_ lookupDatatype xs
 
-data Type
-  = Simple !SimpleAtomicType -- type to find iso correspondence
-  | Complex
+class Capitalizable t where
+  capitalize :: t -> t
 
-capitalize :: String -> String
-capitalize [] = []
-capitalize (a:as) = C.toUpper a : as
+instance Capitalizable String where
+  capitalize []     = []
+  capitalize (a:as) = C.toUpper a : as
+
+instance Capitalizable Text where
+  capitalize t
+    | T.null t  = t
+    | otherwise = T.singleton (C.toUpper (T.head t)) <> T.tail t
 
 -- TODO: improve after moving some XML types to xml-isogen
 simpleTypeToIsoType :: SimpleAtomicType -> Text
@@ -146,22 +151,19 @@ simpleTypeToIsoType (STString _)    = "[t|Text|]"
 simpleTypeToIsoType STTime          = "[t|Text|]"
 
 tellGen
-  :: Text -- type
-  -> Type
-  -> [Text] -- generated code
+  :: [Text] -- generated code
   -> GenMonad ()
-tellGen tyName ty code = do
+tellGen code = do
   tell $ "\n" <> T.unlines code
-  modify $ M.insert tyName ty
 
-runGen :: GenMonad a -> Text
-runGen = execWriter . flip evalStateT M.empty
+runGen :: DatatypeMap -> GenMonad a -> Text
+runGen dm act = execWriter $ runReaderT act dm
 
 generateIsoXml :: XSD -> Text
 generateIsoXml xsd@(XSD (e,d)) =
   let
     (dList, el) = untwistDeps e d
-  in (header <>) . runGen $ do
+  in (header <>) . runGen d $ do
       for_ dList $ \(t,d) -> do
         generateIsoDatatype (Just t) d
       for_ el generateIsoRecord
@@ -197,7 +199,7 @@ typeName (DatatypeRef t)               = Just t
 -- | Push the record to the state and return field dsl
 generateIsoRecord :: Element -> GenMonad ()
 generateIsoRecord (Element (_, laxName) xtype minOc maxOc) = do
-  written <- get
+  written <- ask
   case xtype of
     InlineComplex dt -> generateIsoDatatype (Just laxName) dt
     DatatypeRef nam  -> if M.member nam written
@@ -220,8 +222,8 @@ generateIsoDatatype eName (TypeComplex (ComplexType iName attrs mGroupSchema)) =
     Just groupSchema -> case groupSchema of
       CTSequence elems -> do
         fields <- for elems generateIsoField
-        let header = T.pack (capitalize (T.unpack $ quote name)) <> " =:= record Both"
-        tellGen name Complex (pure header <> fields)
+        let header = (quote $ capitalize name) <> " =:= record Both"
+        tellGen $ pure header <> fields
 generateIsoDatatype eName (TypeSimple (STAtomic iName sat restrictions)) = do
   name <- case eName of
     Just name -> pure name
@@ -232,13 +234,15 @@ generateIsoDatatype eName (TypeSimple (STAtomic iName sat restrictions)) = do
     enums                         = Prelude.filter isEnumeration restrictions
     typeStr = simpleTypeToIsoType sat
   if Prelude.length enums > 0
-  then tellGen
-    typeStr
-    (Simple sat)
-    (generateEnum
-      (quote $ T.pack $ capitalize $ T.unpack name)
-      (F.concatMap fromEnumeration enums))
+  then tellGen (generateEnum
+    (quote $ capitalize name)
+    (F.concatMap fromEnumeration enums))
   else pure ()
+    -- tellGen typeStr (Simple sat) (generateNewtype iName sat)
+
+-- generateNewtype :: Text -> SimpleAtomicType -> Text
+-- generateNewtype n =
+--   "newtype " <> capitalize n <> " = "
 
 generateEnum
   :: Text                -- type name
@@ -256,10 +260,10 @@ lookupSimpleType
   -> GenMonad (Maybe SimpleAtomicType)
 lookupSimpleType (InlineComplex  _) = pure Nothing
 lookupSimpleType (DatatypeRef tyName) = do
-  M.lookup tyName <$> get >>= \case
-    Just Complex     -> pure Nothing
-    Just (Simple ty) -> pure $ Just ty
-    Nothing          -> pure Nothing -- IS IT?
+  M.lookup tyName <$> ask >>= \case
+    Just (TypeComplex _)                 -> pure Nothing
+    Just (TypeSimple (STAtomic _ sat _)) -> pure $ Just sat
+    Nothing                              -> error $ "can't look up type: " <> show tyName
 
 generateIsoField :: Element -> GenMonad Text
 generateIsoField (Element (_, name) xtype minOc maxOc) = do
@@ -268,7 +272,12 @@ generateIsoField (Element (_, name) xtype minOc maxOc) = do
   line <- lookupSimpleType xtype >>= \case
     Just baseTypeName -> do
       pure $ quote name <> " " <> simpleTypeToIsoType baseTypeName
-    Nothing           -> pure $ quote name
+    Nothing           -> case xtype of
+      InlineComplex dt -> do
+        generateIsoDatatype (Just $ capitalize name) dt
+        pure $ quote name
+      DatatypeRef ref ->
+        pure $ quote name <> " [t|" <> capitalize ref <> "|]"
   pure $ "  " <> qualifier <> " " <> line
 
 main :: IO ()
