@@ -23,6 +23,14 @@ import System.IO
 import Text.XSD
 
 
+data GenType = Parser | Generator | Both
+  deriving (Read, Show)
+
+genTypeToText :: GenType -> Text
+genTypeToText Parser    = "Parser"
+genTypeToText Generator = "Generator"
+genTypeToText Both      = "Both"
+
 type GenMonad = ReaderT DatatypeMap (Writer Text)
 
 class References a where
@@ -166,14 +174,14 @@ tellGen code comment = do
 runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
 
-generateIsoXml :: XSD -> Text
-generateIsoXml xsd@(XSD (e,d)) =
+generateIsoXml :: GenType -> XSD -> Text
+generateIsoXml genType xsd@(XSD (e,d)) =
   let
     (dList, el) = untwistDeps e d
-  in (header <>) . runGen d $ do
+  in (header genType <>) . runGen d $ do
       for_ dList $ \(t,d) -> do
-        generateIsoDatatype (Just t) d []
-      for_ el generateIsoRecord
+        generateIsoDatatype genType (Just t) d []
+      for_ el (generateIsoRecord genType)
 
 toQualifier :: Int -> Maybe Int -> Text
 toQualifier minOc (Just maxOc)
@@ -184,12 +192,24 @@ toQualifier minOc (Just maxOc)
   | otherwise = "*"
 toQualifier _ Nothing = "*"
 
-header :: Text
-header = T.unlines
-  [ "module Dummy where"
+header :: GenType -> Text
+header genType = T.unlines $
+  [ "{-# LANGUAGE DuplicateRecordFields #-}"
   , ""
+  , "module Dummy where"
+   ""
   , "import Data.THGen.XML"
+  ] <> specImports <>
+  [ "import Prelude hiding ((*), (+))"
   , "" ]
+  where
+    specImports = case genType of
+      Generator -> [ xmlWriter ]
+      Parser    -> [ domParser ]
+      Both      -> [ domParser, xmlWriter ]
+    xmlWriter, domParser :: Text
+    xmlWriter = "import Text.XML.Writer"
+    domParser = "import Text.XML.DOM.Parser.FromDom"
 
 quote :: Text -> Text
 quote t = "\"" <> t <> "\""
@@ -203,15 +223,18 @@ typeName (InlineComplex dt) = result
       TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType QQ sat
 typeName (DatatypeRef t)               = Just t
 
-generateIsoRecord :: Element -> GenMonad ()
-generateIsoRecord (Element (_, laxName) xtype minOc maxOc annotations) = do
-  written <- ask
-  case xtype of
-    InlineComplex dt -> generateIsoDatatype (Just laxName) dt annotations
-    DatatypeRef nam  -> if M.member nam written
-      then pure ()
-      else error $ "Implementation failure: "
-        <> show nam <> " type never encountered before"
+generateIsoRecord :: GenType -> Element -> GenMonad ()
+generateIsoRecord
+  genType
+  (Element (_, laxName) xtype minOc maxOc annotations) = do
+    written <- ask
+    case xtype of
+      InlineComplex dt ->
+        generateIsoDatatype genType (Just laxName) dt annotations
+      DatatypeRef nam  -> if M.member nam written
+        then pure ()
+        else error $ "Implementation failure: "
+          <> show nam <> " type never encountered before"
 
 data CommentType = Haddock | Regular
 
@@ -242,12 +265,14 @@ wrap80 = L.foldl' go [] . T.split (==' ')
       else L.init l <> [L.last l <> " " <> e]
 
 generateIsoDatatype
-  :: (Maybe Text) -- ^ Explicitly provided name, used for inline complexType's
+  :: GenType
+  -> (Maybe Text) -- ^ Explicitly provided name, used for inline complexType's
   -> Datatype
   -> [Annotation]
   -> GenMonad ()
   -- ^ (type name for lookups, generated code)
 generateIsoDatatype
+  genType
   eName
   (TypeComplex (ComplexType iName attrs annotations mGroupSchema))
   annotationsRec = do
@@ -259,14 +284,18 @@ generateIsoDatatype
     case mGroupSchema of
       Just groupSchema -> case groupSchema of
         CTSequence elems -> do
-          fields <- for elems generateIsoField
+          fields <- for elems (generateIsoField genType)
           let
             comment = toComment Haddock $ annotationsRec
               <> [Documentation ""]
               <> annotations
-            header = (quote $ capitalize name) <> " =:= record Both"
+            header  =
+              (quote $ capitalize name)
+              <> " =:= record "
+              <> genTypeToText genType
           tellGen (header : fields) comment
 generateIsoDatatype
+  genType
   eName
   (TypeSimple (STAtomic iName sat annotations restrictions))
   annotationsRec = do
@@ -289,19 +318,28 @@ generateIsoDatatype
         (F.concatMap fromEnumeration enums))
       comment
     else do
-      tellGen (generateNewtype iName sat) comment
+      tellGen (generateNewtype genType iName sat) comment
 
-generateNewtype :: Text -> SimpleAtomicType -> [Text]
-generateNewtype n sat =
+generateNewtype :: GenType -> Text -> SimpleAtomicType -> [Text]
+generateNewtype genType n sat =
   let
     cons   = "Xml" <> capitalize n
     decons = "un" <> cons
+    parser =
+      [ "instance FromDom " <> cons <> " where"
+      , "  fromDom = " <> cons <> " fromDom"
+      ]
   in
     [ "newtype " <> cons
     , "  = " <> cons
     , "  { " <> decons <> " :: " <> simpleTypeToIsoType Plain sat
-    , "  } deriving (FromDom, ToXML)"
-    ]
+    , "  } deriving (Show, Eq" <> case genType of
+      Parser -> ")"
+      _      -> ", ToXML)"
+    ] <> case genType of
+       Generator -> []
+       _         -> parser
+
 
 generateEnum
   :: Text                -- type name
@@ -334,8 +372,8 @@ lookupSimpleType (DatatypeRef tyName) = do
     Just (TypeSimple (STAtomic nam _ _ _)) -> pure $ Just nam
     Nothing                              -> error $ "can't look up type: " <> show tyName
 
-generateIsoField :: Element -> GenMonad Text
-generateIsoField (Element (_, name) xtype minOc maxOc annotations) = do
+generateIsoField :: GenType -> Element -> GenMonad Text
+generateIsoField genType (Element (_, name) xtype minOc maxOc annotations) = do
   let
     qualifier = toQualifier minOc maxOc
   line <- lookupSimpleType xtype >>= \case
@@ -343,7 +381,7 @@ generateIsoField (Element (_, name) xtype minOc maxOc annotations) = do
       pure $ quote name <> " [t|Xml" <> tyName <> "|]"
     Nothing           -> case xtype of
       InlineComplex dt -> do
-        generateIsoDatatype (Just $ capitalize name) dt annotations
+        generateIsoDatatype genType (Just $ capitalize name) dt annotations
         pure $ quote name
       DatatypeRef ref ->
         pure $ quote name <> " [t|Xml" <> capitalize ref <> "|]"
@@ -351,7 +389,7 @@ generateIsoField (Element (_, name) xtype minOc maxOc annotations) = do
 
 main :: IO ()
 main = do
-  (inFile:_) <- getArgs
+  (inFile:mode:_) <- getArgs
   xml <- BL.readFile inFile
   let Right xsd = parseXSD def xml
-  T.hPutStrLn stdout $ generateIsoXml xsd
+  T.hPutStrLn stdout $ generateIsoXml (read mode) xsd
