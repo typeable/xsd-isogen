@@ -8,6 +8,7 @@ import Control.Monad.RWS.CPS (RWS, execRWS)
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer.CPS (Writer, tell, execWriter)
+import Debug.Trace
 import Data.ByteString.Lazy as BL
 import Data.Char as C
 import Data.Default
@@ -29,7 +30,7 @@ class References a where
   references :: a -> [Text]
 
 instance References Datatype where
-  references (TypeComplex (ComplexType _ _ mmgs)) =
+  references (TypeComplex (ComplexType _ _ _ mmgs)) =
     case mmgs of
       Just mgs -> case mgs of
         CTSequence els -> F.concatMap references els
@@ -39,7 +40,7 @@ instance References Datatype where
   references (TypeSimple _) = []
 
 instance References Element where
-  references (Element _ t _ _) = references t
+  references (Element _ t _ _ _) = references t
 
 instance References DatatypeRef where
   references (DatatypeRef ty)   = [ty]
@@ -152,9 +153,10 @@ simpleTypeToIsoType STTime          = "[t|Text|]"
 
 tellGen
   :: [Text] -- generated code
+  -> Text   -- comment
   -> GenMonad ()
-tellGen code = do
-  tell $ "\n" <> T.unlines code
+tellGen code comment = do
+  tell $ "\n" <> comment <> T.unlines code
 
 runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
@@ -165,7 +167,7 @@ generateIsoXml xsd@(XSD (e,d)) =
     (dList, el) = untwistDeps e d
   in (header <>) . runGen d $ do
       for_ dList $ \(t,d) -> do
-        generateIsoDatatype (Just t) d
+        generateIsoDatatype (Just t) d []
       for_ el generateIsoRecord
 
 toQualifier :: Int -> Maybe Int -> Text
@@ -192,53 +194,98 @@ typeName :: DatatypeRef -> Maybe Text
 typeName (InlineComplex dt) = result
   where
     result = case dt of
-      TypeComplex (ComplexType n _ _) -> n
-      TypeSimple (STAtomic _ sat _)     -> Just $ simpleTypeToIsoType sat
+      TypeComplex (ComplexType n _ _ _) -> n
+      TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType sat
 typeName (DatatypeRef t)               = Just t
 
--- | Push the record to the state and return field dsl
 generateIsoRecord :: Element -> GenMonad ()
-generateIsoRecord (Element (_, laxName) xtype minOc maxOc) = do
+generateIsoRecord (Element (_, laxName) xtype minOc maxOc annotations) = do
   written <- ask
   case xtype of
-    InlineComplex dt -> generateIsoDatatype (Just laxName) dt
+    InlineComplex dt -> generateIsoDatatype (Just laxName) dt annotations
     DatatypeRef nam  -> if M.member nam written
       then pure ()
       else error $ "Implementation failure: "
         <> show nam <> " type never encountered before"
 
+data CommentType = Haddock | Regular
+
+toComment :: CommentType -> [Annotation] -> Text
+toComment ct ann = case texts' of
+  []     -> ""
+  (h:tl) -> T.unlines ((prefix <> h) : fmap ("-- "<>) tl)
+  where
+    texts      = stripTexts $ F.concatMap (wrap80 . fromDocumentation) ann
+    texts'     = trace (show texts) texts
+    stripTexts = \case
+      []       -> []
+      l@(h:tl) -> if T.all (\x -> x == ' ' || x == '\n') h then stripTexts tl else l
+    prefix     = case ct of
+      Haddock -> "-- | "
+      Regular -> "-- "
+
+fromDocumentation :: Annotation -> Text
+fromDocumentation (Documentation t) = t
+
+wrap80 :: Text -> [Text]
+wrap80 = L.foldl' go [] . T.split (==' ')
+  where
+    go [] e = [e]
+    go l  e =
+      let last'    = L.last l
+      in if (T.length last') + T.length e >= 73 -- 80 minus "-- | " and ' '
+      then l <> pure e
+      else L.init l <> [L.last l <> " " <> e]
+
 generateIsoDatatype
-  :: (Maybe Text) -- ^ Explicitly provided name
+  :: (Maybe Text) -- ^ Explicitly provided name, used for inline complexType's
   -> Datatype
+  -> [Annotation]
   -> GenMonad ()
   -- ^ (type name for lookups, generated code)
-generateIsoDatatype eName (TypeComplex (ComplexType iName attrs mGroupSchema)) = do
-  name <- case eName of
-    Just name -> pure name
-    Nothing   -> case iName of
-      Just name' -> pure name'
-      Nothing    -> error $ "[generateIsoDatatype] no name was provided"
-  case mGroupSchema of
-    Just groupSchema -> case groupSchema of
-      CTSequence elems -> do
-        fields <- for elems generateIsoField
-        let header = (quote $ capitalize name) <> " =:= record Both"
-        tellGen $ pure header <> fields
-generateIsoDatatype eName (TypeSimple (STAtomic iName sat restrictions)) = do
-  name <- case eName of
-    Just name -> pure name
-    Nothing   -> pure iName
-  let
-    isEnumeration (Enumeration _) = True
-    fromEnumeration (Enumeration x) = x
-    enums                         = Prelude.filter isEnumeration restrictions
-    typeStr = simpleTypeToIsoType sat
-  if Prelude.length enums > 0
-  then tellGen (generateEnum
-    (quote $ capitalize name)
-    (F.concatMap fromEnumeration enums))
-  else pure ()
-    -- tellGen typeStr (Simple sat) (generateNewtype iName sat)
+generateIsoDatatype
+  eName
+  (TypeComplex (ComplexType iName attrs annotations mGroupSchema))
+  annotationsRec = do
+    name <- case eName of
+      Just name -> pure name
+      Nothing   -> case iName of
+        Just name' -> pure name'
+        Nothing    -> error $ "[generateIsoDatatype] no name was provided"
+    case mGroupSchema of
+      Just groupSchema -> case groupSchema of
+        CTSequence elems -> do
+          fields <- for elems generateIsoField
+          let
+            comment = toComment Haddock $ annotationsRec
+              <> [Documentation ""]
+              <> annotations
+            header = (quote $ capitalize name) <> " =:= record Both"
+          tellGen (header : fields) comment
+generateIsoDatatype
+  eName
+  (TypeSimple (STAtomic iName sat annotations restrictions))
+  annotationsRec = do
+    name <- case eName of
+      Just name -> pure name
+      Nothing   -> pure iName
+    let
+      comment                         =
+        toComment Haddock $ annotationsRec
+          <> [Documentation ""]
+          <> annotations
+      isEnumeration (Enumeration _)   = True
+      fromEnumeration (Enumeration x) = x
+      enums                           = Prelude.filter isEnumeration restrictions
+      typeStr                         = simpleTypeToIsoType sat
+    if Prelude.length enums > 0
+    then tellGen
+      (generateEnum
+        (quote $ capitalize name)
+        (F.concatMap fromEnumeration enums))
+      comment
+    else pure ()
+      -- tellGen typeStr (Simple sat) (generateNewtype iName sat)
 
 -- generateNewtype :: Text -> SimpleAtomicType -> Text
 -- generateNewtype n =
@@ -262,11 +309,11 @@ lookupSimpleType (InlineComplex  _) = pure Nothing
 lookupSimpleType (DatatypeRef tyName) = do
   M.lookup tyName <$> ask >>= \case
     Just (TypeComplex _)                 -> pure Nothing
-    Just (TypeSimple (STAtomic _ sat _)) -> pure $ Just sat
+    Just (TypeSimple (STAtomic _ sat _ _)) -> pure $ Just sat
     Nothing                              -> error $ "can't look up type: " <> show tyName
 
 generateIsoField :: Element -> GenMonad Text
-generateIsoField (Element (_, name) xtype minOc maxOc) = do
+generateIsoField (Element (_, name) xtype minOc maxOc annotations) = do
   let
     qualifier = toQualifier minOc maxOc
   line <- lookupSimpleType xtype >>= \case
@@ -274,10 +321,10 @@ generateIsoField (Element (_, name) xtype minOc maxOc) = do
       pure $ quote name <> " " <> simpleTypeToIsoType baseTypeName
     Nothing           -> case xtype of
       InlineComplex dt -> do
-        generateIsoDatatype (Just $ capitalize name) dt
+        generateIsoDatatype (Just $ capitalize name) dt annotations
         pure $ quote name
       DatatypeRef ref ->
-        pure $ quote name <> " [t|" <> capitalize ref <> "|]"
+        pure $ quote name <> " [t|Xml" <> capitalize ref <> "|]"
   pure $ "  " <> qualifier <> " " <> line
 
 main :: IO ()
