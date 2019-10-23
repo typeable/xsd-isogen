@@ -8,7 +8,6 @@ import Control.Monad.RWS.CPS (RWS, execRWS)
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer.CPS (Writer, tell, execWriter)
-import Debug.Trace
 import Data.ByteString.Lazy as BL
 import Data.Char as C
 import Data.Default
@@ -128,28 +127,34 @@ instance Capitalizable Text where
     | T.null t  = t
     | otherwise = T.singleton (C.toUpper (T.head t)) <> T.tail t
 
+data DataFlavour = QQ | Plain
+
 -- TODO: improve after moving some XML types to xml-isogen
-simpleTypeToIsoType :: SimpleAtomicType -> Text
-simpleTypeToIsoType STAnyURI        = "[t|Text|]"
-simpleTypeToIsoType STBase64Binary  = "[t|ByteString|]"
-simpleTypeToIsoType STBoolean       = "[t|Bool|]"
-simpleTypeToIsoType STDate          = "[t|Date \"%YYYYj\"|]"
-simpleTypeToIsoType STDateTime      = "[t|Text|]"
-simpleTypeToIsoType STDateTimeStamp = "[t|Text|]"
-simpleTypeToIsoType (STDecimal _)   = "[t|Integer|]"
-simpleTypeToIsoType STDouble        = "[t|Double|]"
-simpleTypeToIsoType (STDuration _)  = "[t|Integer|]"
-simpleTypeToIsoType STFloat         = "[t|Float|]"
-simpleTypeToIsoType STGDay          = "[t|Day|]"
-simpleTypeToIsoType STGMonth        = "[t|Text|]"
-simpleTypeToIsoType STGMonthDay     = "[t|Text|]"
-simpleTypeToIsoType STGYear         = "[t|Text|]"
-simpleTypeToIsoType STGYearMonth    = "[t|Text|]"
-simpleTypeToIsoType STHexBinary     = "[t|Text|]"
-simpleTypeToIsoType STNOTATION      = "[t|Text|]"
-simpleTypeToIsoType STQName         = "[t|Text|]"
-simpleTypeToIsoType (STString _)    = "[t|Text|]"
-simpleTypeToIsoType STTime          = "[t|Text|]"
+simpleTypeToIsoType :: DataFlavour -> SimpleAtomicType -> Text
+simpleTypeToIsoType fl = \case
+  STAnyURI        -> wrap fl "Text"
+  STBase64Binary  -> wrap fl "ByteString"
+  STBoolean       -> wrap fl "Bool"
+  STDate          -> wrap fl "Date \"%YYYYj\""
+  STDateTime      -> wrap fl "Text"
+  STDateTimeStamp -> wrap fl "Text"
+  (STDecimal _)   -> wrap fl "Integer"
+  STDouble        -> wrap fl "Double"
+  (STDuration _)  -> wrap fl "Integer"
+  STFloat         -> wrap fl "Float"
+  STGDay          -> wrap fl "Day"
+  STGMonth        -> wrap fl "Text"
+  STGMonthDay     -> wrap fl "Text"
+  STGYear         -> wrap fl "Text"
+  STGYearMonth    -> wrap fl "Text"
+  STHexBinary     -> wrap fl "Text"
+  STNOTATION      -> wrap fl "Text"
+  STQName         -> wrap fl "Text"
+  (STString _)    -> wrap fl "Text"
+  STTime          -> wrap fl "Text"
+  where
+    wrap QQ    t = "[t|" <> t <> "|]"
+    wrap Plain t = t
 
 tellGen
   :: [Text] -- generated code
@@ -195,7 +200,7 @@ typeName (InlineComplex dt) = result
   where
     result = case dt of
       TypeComplex (ComplexType n _ _ _) -> n
-      TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType sat
+      TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType QQ sat
 typeName (DatatypeRef t)               = Just t
 
 generateIsoRecord :: Element -> GenMonad ()
@@ -211,12 +216,11 @@ generateIsoRecord (Element (_, laxName) xtype minOc maxOc annotations) = do
 data CommentType = Haddock | Regular
 
 toComment :: CommentType -> [Annotation] -> Text
-toComment ct ann = case texts' of
+toComment ct ann = case texts of
   []     -> ""
   (h:tl) -> T.unlines ((prefix <> h) : fmap ("-- "<>) tl)
   where
     texts      = stripTexts $ F.concatMap (wrap80 . fromDocumentation) ann
-    texts'     = trace (show texts) texts
     stripTexts = \case
       []       -> []
       l@(h:tl) -> if T.all (\x -> x == ' ' || x == '\n') h then stripTexts tl else l
@@ -277,19 +281,27 @@ generateIsoDatatype
       isEnumeration (Enumeration _)   = True
       fromEnumeration (Enumeration x) = x
       enums                           = Prelude.filter isEnumeration restrictions
-      typeStr                         = simpleTypeToIsoType sat
+      typeStr                         = simpleTypeToIsoType QQ sat
     if Prelude.length enums > 0
     then tellGen
       (generateEnum
         (quote $ capitalize name)
         (F.concatMap fromEnumeration enums))
       comment
-    else pure ()
-      -- tellGen typeStr (Simple sat) (generateNewtype iName sat)
+    else do
+      tellGen (generateNewtype iName sat) comment
 
--- generateNewtype :: Text -> SimpleAtomicType -> Text
--- generateNewtype n =
---   "newtype " <> capitalize n <> " = "
+generateNewtype :: Text -> SimpleAtomicType -> [Text]
+generateNewtype n sat =
+  let
+    cons   = "Xml" <> capitalize n
+    decons = "un" <> cons
+  in
+    [ "newtype " <> cons
+    , "  = " <> cons
+    , "  { " <> decons <> " :: " <> simpleTypeToIsoType Plain sat
+    , "  } deriving (FromDom, ToXML)"
+    ]
 
 generateEnum
   :: Text                -- type name
@@ -302,14 +314,24 @@ generateEnum name enums =
   in pure header <> eFields
 
 -- | Returns Just baseTypeName if type is simple, Nothing - otherwise
-lookupSimpleType
+lookupSimpleBaseType
   :: DatatypeRef
   -> GenMonad (Maybe SimpleAtomicType)
-lookupSimpleType (InlineComplex  _) = pure Nothing
-lookupSimpleType (DatatypeRef tyName) = do
+lookupSimpleBaseType (InlineComplex  _) = pure Nothing
+lookupSimpleBaseType (DatatypeRef tyName) = do
   M.lookup tyName <$> ask >>= \case
     Just (TypeComplex _)                 -> pure Nothing
     Just (TypeSimple (STAtomic _ sat _ _)) -> pure $ Just sat
+    Nothing                              -> error $ "can't look up type: " <> show tyName
+
+lookupSimpleType
+  :: DatatypeRef
+  -> GenMonad (Maybe Text)
+lookupSimpleType (InlineComplex  _) = pure Nothing
+lookupSimpleType (DatatypeRef tyName) = do
+  M.lookup tyName <$> ask >>= \case
+    Just (TypeComplex _)                   -> pure Nothing
+    Just (TypeSimple (STAtomic nam _ _ _)) -> pure $ Just nam
     Nothing                              -> error $ "can't look up type: " <> show tyName
 
 generateIsoField :: Element -> GenMonad Text
@@ -317,8 +339,8 @@ generateIsoField (Element (_, name) xtype minOc maxOc annotations) = do
   let
     qualifier = toQualifier minOc maxOc
   line <- lookupSimpleType xtype >>= \case
-    Just baseTypeName -> do
-      pure $ quote name <> " " <> simpleTypeToIsoType baseTypeName
+    Just tyName -> do
+      pure $ quote name <> " [t|Xml" <> tyName <> "|]"
     Nothing           -> case xtype of
       InlineComplex dt -> do
         generateIsoDatatype (Just $ capitalize name) dt annotations
