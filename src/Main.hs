@@ -18,6 +18,7 @@ import Data.Set as S
 import Data.Text as T
 import Data.Text.IO as T
 import Data.Traversable
+import Debug.Trace
 import System.Environment
 import System.IO
 import Text.XSD
@@ -73,7 +74,7 @@ proceed' el = do
 untwistDeps :: [Element] -> DatatypeMap -> ([(Text, Datatype)], [Element])
 untwistDeps e dm = (dList, e')
   where
-    dList   = execWriter $ do
+    dList   = nub $ execWriter $ do
       (a, (_,s)) <- runStateT sortDatatypesByDeps (dm, S.empty)
       return a
     (_, e') = execRWS sortElemsByDeps (M.fromList dList) e
@@ -83,6 +84,7 @@ sortElemsByDeps = do
   els <- get
   if Prelude.null els then pure () else do
     let first = Prelude.head els
+    -- traceM $ "sortElemsByDeps: " <> show first
     case references first of
       [] -> proceed' first >> sortElemsByDeps
       xs -> do
@@ -95,6 +97,7 @@ sortElemsByDeps = do
 
 memberDatatype :: Text -> PreElemMonad Bool
 memberDatatype ty = do
+  -- traceM $ "memberDatatype: " <> show ty
   dm <- ask
   case M.lookup ty dm of
     Just typ -> return True
@@ -105,6 +108,7 @@ sortDatatypesByDeps = do
   (dm, s) <- get
   if M.null dm then pure () else do
     let first = Prelude.head (M.toList dm)
+    traceM $ "sortDatatypesByDeps: " <> show first
     case references $ snd first of
       [] -> uncurry proceed first >> sortDatatypesByDeps
       xs -> do
@@ -114,6 +118,7 @@ sortDatatypesByDeps = do
 
 lookupDatatype :: Text -> PreMonad ()
 lookupDatatype ty = do
+  traceM $ "lookupDatatype: " <> show ty
   (dm, s) <- get
   let mTy = M.lookup ty dm
   case M.lookup ty dm of
@@ -121,7 +126,7 @@ lookupDatatype ty = do
       error $ "can't look up datatype: " <> show ty
     Just typ -> case references typ of
       [] -> proceed ty typ >> sortDatatypesByDeps
-      xs -> traverse_ lookupDatatype xs
+      xs -> traverse_ lookupDatatype xs >> proceed ty typ
 
 class Capitalizable t where
   capitalize :: t -> t
@@ -183,21 +188,19 @@ generateIsoXml genType xsd@(XSD (e,d)) =
         generateIsoDatatype genType (Just t) d []
       for_ el (generateIsoRecord genType)
 
-toQualifier :: Int -> Maybe Int -> Text
-toQualifier minOc (Just maxOc)
+toQualifier :: Int -> Int -> Text
+toQualifier minOc maxOc
   | minOc == 1 && maxOc == 1 = "!"
   | minOc == 0 && maxOc == 1 = "?"
   | minOc == 1 && maxOc > minOc = "+"
   | minOc == 1 && maxOc < minOc = error "maxOccurs < minOccurs"
   | otherwise = "*"
-toQualifier _ Nothing = "*"
 
 header :: GenType -> Text
 header genType = T.unlines $
-  [ "{-# LANGUAGE DuplicateRecordFields #-}"
+  [ "module Dummy where"
   , ""
-  , "module Dummy where"
-   ""
+  , "import Control.DeepSeq"
   , "import Data.THGen.XML"
   ] <> specImports <>
   [ "import Prelude hiding ((*), (+))"
@@ -326,20 +329,20 @@ generateNewtype genType n sat =
     cons   = "Xml" <> capitalize n
     decons = "un" <> cons
     parser =
-      [ "instance FromDom " <> cons <> " where"
-      , "  fromDom = " <> cons <> " fromDom"
+      [ ""
+      , "instance FromDom " <> cons <> " where"
+      , "  fromDom = " <> cons <> " <$> fromDom"
       ]
   in
     [ "newtype " <> cons
     , "  = " <> cons
     , "  { " <> decons <> " :: " <> simpleTypeToIsoType Plain sat
-    , "  } deriving (Show, Eq" <> case genType of
+    , "  } deriving (Show, Eq, NFData" <> case genType of
       Parser -> ")"
       _      -> ", ToXML)"
     ] <> case genType of
        Generator -> []
        _         -> parser
-
 
 generateEnum
   :: Text                -- type name
@@ -391,5 +394,8 @@ main :: IO ()
 main = do
   (inFile:mode:_) <- getArgs
   xml <- BL.readFile inFile
-  let Right xsd = parseXSD def xml
+  let
+    xsd = case parseXSD def xml of
+      Right xsd -> xsd
+      Left e    -> error $ show e
   T.hPutStrLn stdout $ generateIsoXml (read mode) xsd
