@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -24,6 +25,9 @@ import System.IO
 import Text.XSD
 
 
+makeNamePrefix :: Text -> Text
+makeNamePrefix = T.map C.toLower . T.filter (\c -> C.isUpper c || C.isDigit c)
+
 data GenType = Parser | Generator | Both
   deriving (Read, Show)
 
@@ -33,6 +37,27 @@ genTypeToText Generator = "Generator"
 genTypeToText Both      = "Both"
 
 type GenMonad = ReaderT DatatypeMap (Writer Text)
+
+class Fields a where
+  fields :: a -> [Text]
+
+instance Fields Datatype where
+  fields (TypeComplex ty) = fields ty
+  fields (TypeSimple ty) = fields ty
+
+instance Fields SimpleType where
+  fields ty@(STAtomic tyName _ _ restrictions) = if shouldBeNewtype ty
+    then [getNewtypeUnconsName tyName]
+    else getEnumeratedCode restrictions
+
+instance Fields ComplexType where
+  fields (ComplexType _ _ _ (Just g)) = fields g
+  fields (ComplexType _ _ _ Nothing) = []
+
+instance Fields ModelGroupSchema where
+  fields (CTSequence els) = snd . name <$> els
+  fields (CTChoice els) = snd . name <$> els
+  fields (CTAll els) = snd . name <$> els
 
 class References a where
   references :: a -> [Text]
@@ -57,15 +82,19 @@ instance References DatatypeRef where
 instance References a => References [a] where
   references = F.concatMap references
 
+--                    / Types left | Types already \
+--                    \ to process |  processed    /
 type PreMonad = StateT (DatatypeMap, S.Set Text) (Writer [(Text, Datatype)])
 
 type PreElemMonad = RWS DatatypeMap [Element] [Element]
 
+-- | Marks the given type as processed.
 proceed :: Text -> Datatype -> PreMonad ()
 proceed t dt = do
   tell [(t, dt)]
   modify $ \(f,s) -> (M.delete t f, S.insert t s)
 
+-- | Marks element as processed.
 proceed' :: Element -> PreElemMonad ()
 proceed' el = do
   tell [el]
@@ -74,10 +103,37 @@ proceed' el = do
 untwistDeps :: [Element] -> DatatypeMap -> ([(Text, Datatype)], [Element])
 untwistDeps e dm = (dList, e')
   where
-    dList   = nub $ execWriter $ do
-      (a, (_,s)) <- runStateT sortDatatypesByDeps (dm, S.empty)
+    dList   = deconflictNames . nub . execWriter $ do
+      (a, _) <- runStateT sortDatatypesByDeps (dm, S.empty)
       return a
     (_, e') = execRWS sortElemsByDeps (M.fromList dList) e
+
+type Abbreviation = Text
+type Subelement = Text
+type DeconflicterMonad = State (M.Map Abbreviation (S.Set Subelement))
+
+deconflictNames :: [(Text, Datatype)] -> [(Text, Datatype)]
+deconflictNames = flip evalState mempty . mapM deconflictName
+
+deconflictName :: (Text, Datatype) -> DeconflicterMonad (Text, Datatype)
+deconflictName (tyName', dt) = do
+  let rNames = S.fromList $ fields dt
+  (, dt) <$> attempt tyName' rNames 1
+  where
+    attempt :: Abbreviation -> S.Set Subelement -> Int -> DeconflicterMonad Text
+    attempt tyName fieldNames n = do
+      processedTypes <- get
+      let
+        newTyName = if n == 1
+          then tyName
+          else tyName <> "_" <> T.pack (show n)
+        abr = makeNamePrefix newTyName
+      case M.lookup abr processedTypes of
+        Just usedNames ->
+          if S.null $ S.intersection fieldNames usedNames
+            then modify (M.adjust (S.union fieldNames) abr) >> return newTyName
+            else attempt tyName fieldNames (n + 1)
+        Nothing -> modify (M.insert abr fieldNames) >> return newTyName
 
 sortElemsByDeps :: PreElemMonad ()
 sortElemsByDeps = do
@@ -89,7 +145,7 @@ sortElemsByDeps = do
       [] -> proceed' first >> sortElemsByDeps
       xs -> do
         results <- traverse memberDatatype xs
-        if L.all id results
+        if L.and results
         then proceed' first >> sortElemsByDeps
         else do
           let failed = fmap snd $ L.filter (not . fst) $ L.zip results xs
@@ -100,12 +156,12 @@ memberDatatype ty = do
   -- traceM $ "memberDatatype: " <> show ty
   dm <- ask
   case M.lookup ty dm of
-    Just typ -> return True
+    Just _ -> return True
     Nothing  -> return False
 
 sortDatatypesByDeps :: PreMonad ()
 sortDatatypesByDeps = do
-  (dm, s) <- get
+  (dm, _) <- get
   if M.null dm then pure () else do
     let first = Prelude.head (M.toList dm)
     traceM $ "sortDatatypesByDeps: " <> show first
@@ -120,12 +176,11 @@ lookupDatatype :: Text -> PreMonad ()
 lookupDatatype ty = do
   traceM $ "lookupDatatype: " <> show ty
   (dm, s) <- get
-  let mTy = M.lookup ty dm
   case M.lookup ty dm of
-    Nothing -> if S.member ty s then pure () else do
+    Nothing -> if S.member ty s then pure () else
       error $ "can't look up datatype: " <> show ty
     Just typ -> case references typ of
-      [] -> proceed ty typ >> sortDatatypesByDeps
+      [] -> proceed ty typ -- >> sortDatatypesByDeps -- Pretty sure this was a bug
       xs -> traverse_ lookupDatatype xs >> proceed ty typ
 
 class Capitalizable t where
@@ -174,19 +229,19 @@ tellGen
   :: [Text] -- generated code
   -> Text   -- comment
   -> GenMonad ()
-tellGen code comment = do
+tellGen code comment =
   tell $ "\n" <> comment <> T.unlines code
 
 runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
 
 generateIsoXml :: GenType -> XSD -> Text
-generateIsoXml genType xsd@(XSD (e,d)) =
+generateIsoXml genType (XSD (e,dm)) =
   let
-    (dList, el) = untwistDeps e d
-  in (header genType <>) . runGen d $ do
-      for_ dList $ \(t,d) -> do
-        generateIsoDatatype genType (Just t) d []
+    (dList, el) = untwistDeps e dm
+  in (header genType <>) . runGen dm $ do
+      for_ dList $ \(t,dt) ->
+        generateIsoDatatype genType t dt []
       for_ el (generateIsoRecord genType)
 
 toQualifier :: Int -> Int -> Text
@@ -230,11 +285,11 @@ typeName (DatatypeRef t)               = Just t
 generateIsoRecord :: GenType -> Element -> GenMonad ()
 generateIsoRecord
   genType
-  (Element (_, laxName) xtype minOc maxOc annotations) = do
+  (Element (_, laxName) elXtype _ _ elAnnotations) = do
     written <- ask
-    case xtype of
+    case elXtype of
       InlineComplex dt ->
-        generateIsoDatatype genType (Just laxName) dt annotations
+        generateIsoDatatype genType laxName dt elAnnotations
       DatatypeRef nam  -> if M.member nam written
         then pure ()
         else error $ "Implementation failure: "
@@ -264,13 +319,13 @@ wrap80 = L.foldl' go [] . T.split (==' ')
     go [] e = [e]
     go l  e =
       let last'    = L.last l
-      in if (T.length last') + T.length e >= 73 -- 80 minus "-- | " and ' '
+      in if T.length last' + T.length e >= 73 -- 80 minus "-- | " and ' '
       then l <> pure e
       else L.init l <> [L.last l <> " " <> e]
 
 generateIsoDatatype
   :: GenType
-  -> (Maybe Text) -- ^ Explicitly provided name, used for inline complexType's
+  -> Text
   -> Datatype
   -> [Annotation]
   -> GenMonad ()
@@ -278,65 +333,85 @@ generateIsoDatatype
 generateIsoDatatype
   genType
   eName
-  (TypeComplex (ComplexType iName attrs annotations mGroupSchema))
+  (TypeComplex (ComplexType _ _ tyAnnotations mGroupSchema))
   annotationsRec = do
-    name <- case eName of
-      Just name -> pure name
-      Nothing   -> case iName of
-        Just name' -> pure name'
-        Nothing    -> error $ "[generateIsoDatatype] no name was provided"
+    let finalName = eName
+    -- finalName <- case eName of
+    --   Just name' -> pure name'
+    --   Nothing   -> case iName of
+    --     Just name' -> pure name'
+    --     Nothing    -> error "[generateIsoDatatype] no name was provided"
     case mGroupSchema of
       Just groupSchema -> case groupSchema of
-        CTSequence elems -> do
-          fields <- for elems (generateIsoField genType)
+        CTSequence elements -> do
+          tyFields <- for elements (generateIsoField genType)
           let
             comment = toComment Haddock $ annotationsRec
               <> [Documentation ""]
-              <> annotations
-            header  =
-              (quote $ capitalize name)
+              <> tyAnnotations
+            tyHeader  =
+              quote (capitalize finalName)
               <> " =:= record "
               <> genTypeToText genType
-          tellGen (header : fields) comment
+          tellGen (tyHeader : tyFields) comment
+        CTChoice _ -> error "'Choice' group not supported yet"
+        CTAll _ -> error "'All' group not supported yet"
+      Nothing -> error $ "No group schema provided for type: " <> T.unpack finalName
 generateIsoDatatype
   genType
   eName
-  (TypeSimple (STAtomic iName sat annotations restrictions))
+  (TypeSimple ty@(STAtomic iName sat tyAnnotations restrictions))
   annotationsRec = do
-    name <- case eName of
-      Just name -> pure name
-      Nothing   -> pure iName
+    let finalName = eName
+    -- finalName <- case eName of
+    --   Just name' -> pure name'
+    --   Nothing   -> pure iName
     let
       comment                         =
         toComment Haddock $ annotationsRec
           <> [Documentation ""]
-          <> annotations
-      isEnumeration (Enumeration _)   = True
-      fromEnumeration (Enumeration x) = x
-      enums                           = Prelude.filter isEnumeration restrictions
-      typeStr                         = simpleTypeToIsoType QQ sat
-    if Prelude.length enums > 0
+          <> tyAnnotations
+      -- typeStr                         = simpleTypeToIsoType QQ sat
+    if not (shouldBeNewtype ty)
     then tellGen
       (generateEnum
-        (quote $ capitalize name)
-        (F.concatMap fromEnumeration enums))
+        (quote $ capitalize finalName)
+        (getEnumeratedCode restrictions))
       comment
-    else do
+    else
       tellGen (generateNewtype genType iName sat) comment
+
+getEnumeratedCode :: [Restriction] -> [Text]
+getEnumeratedCode = F.concatMap fromEnumeration . Prelude.filter isEnumeration
+  where
+    fromEnumeration (Enumeration x) = x
+
+isEnumeration :: Restriction -> Bool
+isEnumeration (Enumeration _) = True
+
+shouldBeNewtype :: SimpleType -> Bool
+shouldBeNewtype (STAtomic _ _ _ restrictions) =
+  not . Prelude.any isEnumeration $ restrictions
+
+getNewtypeConsName :: Text -> Text
+getNewtypeConsName = ("Xml" <>) . capitalize
+
+getNewtypeUnconsName :: Text -> Text
+getNewtypeUnconsName = ("un" <>) . getNewtypeConsName
 
 generateNewtype :: GenType -> Text -> SimpleAtomicType -> [Text]
 generateNewtype genType n sat =
   let
-    cons   = "Xml" <> capitalize n
-    decons = "un" <> cons
-    parser =
+    constructor = getNewtypeConsName n
+    decons      = getNewtypeUnconsName n
+    parser      =
       [ ""
-      , "instance FromDom " <> cons <> " where"
-      , "  fromDom = " <> cons <> " <$> fromDom"
+      , "instance FromDom " <> constructor <> " where"
+      , "  fromDom = " <> constructor <> " <$> fromDom"
       ]
   in
-    [ "newtype " <> cons
-    , "  = " <> cons
+    [ "newtype " <> constructor
+    , "  = " <> constructor
     , "  { " <> decons <> " :: " <> simpleTypeToIsoType Plain sat
     , "  } deriving (Show, Eq, NFData" <> case genType of
       Parser -> ")"
@@ -349,47 +424,49 @@ generateEnum
   :: Text                -- type name
   -> [Text]              -- enums
   -> [Text]              -- generated code
-generateEnum name enums =
+generateEnum enumName enums =
   let
-   header  = name <> " Exhaustive =:= enum Both"
+   enumHeader  = enumName <> " Exhaustive =:= enum Both"
    eFields = ("& "<>) <$> enums
-  in pure header <> eFields
+  in pure enumHeader <> eFields
 
 -- | Returns Just baseTypeName if type is simple, Nothing - otherwise
 lookupSimpleBaseType
   :: DatatypeRef
   -> GenMonad (Maybe SimpleAtomicType)
 lookupSimpleBaseType (InlineComplex  _) = pure Nothing
-lookupSimpleBaseType (DatatypeRef tyName) = do
-  M.lookup tyName <$> ask >>= \case
-    Just (TypeComplex _)                 -> pure Nothing
+lookupSimpleBaseType (DatatypeRef tyName) =
+  asks (M.lookup tyName) >>= \case
+    Just (TypeComplex _)                   -> pure Nothing
     Just (TypeSimple (STAtomic _ sat _ _)) -> pure $ Just sat
-    Nothing                              -> error $ "can't look up type: " <> show tyName
+    Nothing                                -> error $ "can't look up type: " <> show tyName
 
 lookupSimpleType
   :: DatatypeRef
   -> GenMonad (Maybe Text)
 lookupSimpleType (InlineComplex  _) = pure Nothing
-lookupSimpleType (DatatypeRef tyName) = do
-  M.lookup tyName <$> ask >>= \case
+lookupSimpleType (DatatypeRef tyName) =
+  asks (M.lookup tyName) >>= \case
     Just (TypeComplex _)                   -> pure Nothing
     Just (TypeSimple (STAtomic nam _ _ _)) -> pure $ Just nam
-    Nothing                              -> error $ "can't look up type: " <> show tyName
+    Nothing                                -> error $ "can't look up type: " <> show tyName
 
 generateIsoField :: GenType -> Element -> GenMonad Text
-generateIsoField genType (Element (_, name) xtype minOc maxOc annotations) = do
-  let
-    qualifier = toQualifier minOc maxOc
-  line <- lookupSimpleType xtype >>= \case
-    Just tyName -> do
-      pure $ quote name <> " [t|Xml" <> tyName <> "|]"
-    Nothing           -> case xtype of
-      InlineComplex dt -> do
-        generateIsoDatatype genType (Just $ capitalize name) dt annotations
-        pure $ quote name
-      DatatypeRef ref ->
-        pure $ quote name <> " [t|Xml" <> capitalize ref <> "|]"
-  pure $ "  " <> qualifier <> " " <> line
+generateIsoField
+  genType
+  (Element (_, fieldName) fieldXtype minOc maxOc fieldAnnotations) = do
+    let
+      qualifier = toQualifier minOc maxOc
+    line <- lookupSimpleType fieldXtype >>= \case
+      Just tyName ->
+        pure $ quote fieldName <> " [t|Xml" <> tyName <> "|]"
+      Nothing           -> case fieldXtype of
+        InlineComplex dt -> do
+          generateIsoDatatype genType (capitalize fieldName) dt fieldAnnotations
+          pure $ quote fieldName
+        DatatypeRef ref ->
+          pure $ quote fieldName <> " [t|Xml" <> capitalize ref <> "|]"
+    pure $ "  " <> qualifier <> " " <> line
 
 main :: IO ()
 main = do
@@ -397,6 +474,6 @@ main = do
   xml <- BL.readFile inFile
   let
     xsd = case parseXSD def xml of
-      Right xsd -> xsd
+      Right xsd' -> xsd'
       Left e    -> error $ show e
   T.hPutStrLn stdout $ generateIsoXml (read mode) xsd
