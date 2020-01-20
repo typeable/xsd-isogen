@@ -3,7 +3,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
-module Main where
+module Main
+  ( main
+  ) where
 
 import Control.Monad.RWS.CPS (RWS, execRWS)
 import Control.Monad.Reader
@@ -276,13 +278,13 @@ quote :: Text -> Text
 quote t = "\"" <> t <> "\""
 
 -- | Nothing means unknown name
-typeName :: DatatypeRef -> Maybe Text
-typeName (InlineComplex dt) = result
-  where
-    result = case dt of
-      TypeComplex (ComplexType n _ _ _) -> n
-      TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType QQ sat
-typeName (DatatypeRef t)               = Just t
+-- typeName :: DatatypeRef -> Maybe Text
+-- typeName (InlineComplex dt) = result
+--   where
+--     result = case dt of
+--       TypeComplex (ComplexType n _ _ _) -> n
+--       TypeSimple (STAtomic _ sat _ _)     -> Just $ simpleTypeToIsoType QQ sat
+-- typeName (DatatypeRef t)               = Just t
 
 generateIsoRecord :: GenType -> Element -> GenMonad ()
 generateIsoRecord
@@ -433,15 +435,15 @@ generateEnum enumName enums =
   in pure enumHeader <> eFields
 
 -- | Returns Just baseTypeName if type is simple, Nothing - otherwise
-lookupSimpleBaseType
-  :: DatatypeRef
-  -> GenMonad (Maybe SimpleAtomicType)
-lookupSimpleBaseType (InlineComplex  _) = pure Nothing
-lookupSimpleBaseType (DatatypeRef tyName) =
-  asks (M.lookup tyName) >>= \case
-    Just (TypeComplex _)                   -> pure Nothing
-    Just (TypeSimple (STAtomic _ sat _ _)) -> pure $ Just sat
-    Nothing                                -> error $ "can't look up type: " <> show tyName
+-- lookupSimpleBaseType
+--   :: DatatypeRef
+--   -> GenMonad (Maybe SimpleAtomicType)
+-- lookupSimpleBaseType (InlineComplex  _) = pure Nothing
+-- lookupSimpleBaseType (DatatypeRef tyName) =
+--   asks (M.lookup tyName) >>= \case
+--     Just (TypeComplex _)                   -> pure Nothing
+--     Just (TypeSimple (STAtomic _ sat _ _)) -> pure $ Just sat
+--     Nothing                                -> error $ "can't look up type: " <> show tyName
 
 lookupSimpleType
   :: DatatypeRef
