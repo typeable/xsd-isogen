@@ -124,9 +124,10 @@ deconflictName (tyName', dt) = do
     attempt tyName fieldNames n = do
       processedTypes <- get
       let
-        newTyName = if n == 1
-          then tyName
-          else tyName <> "_" <> T.pack (show n)
+        newTyName
+          | n == 1 = tyName
+          | shouldSeparateNumber = tyName <> "_" <> T.pack (show n)
+          | otherwise = tyName <> T.pack (show n)
         abr = makeNamePrefix newTyName
       case M.lookup abr processedTypes of
         Just usedNames ->
@@ -134,6 +135,7 @@ deconflictName (tyName', dt) = do
             then modify (M.adjust (S.union fieldNames) abr) >> return newTyName
             else attempt tyName fieldNames (n + 1)
         Nothing -> modify (M.insert abr fieldNames) >> return newTyName
+    shouldSeparateNumber = isDigit $ T.last tyName'
 
 sortElemsByDeps :: PreElemMonad ()
 sortElemsByDeps = do
