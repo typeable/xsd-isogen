@@ -82,8 +82,8 @@ instance References DatatypeRef where
 instance References a => References [a] where
   references = F.concatMap references
 
---                    / Types left | Types already \
---                    \ to process |  processed    /
+-- | 'DatatypeMap' are the types left to process
+-- 'S.Set Text' are the types already processed.
 type PreMonad = StateT (DatatypeMap, S.Set Text) (Writer [(Text, Datatype)])
 
 type PreElemMonad = RWS DatatypeMap [Element] [Element]
