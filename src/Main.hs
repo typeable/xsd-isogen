@@ -25,18 +25,12 @@ import Debug.Trace
 import System.Environment
 import System.IO
 import Text.XSD
+import Options
+import Data.Maybe
 
 
 makeNamePrefix :: Text -> Text
 makeNamePrefix = T.map C.toLower . T.filter (\c -> C.isUpper c || C.isDigit c)
-
-data GenType = Parser | Generator | Both
-  deriving (Read, Show)
-
-genTypeToText :: GenType -> Text
-genTypeToText Parser    = "Parser"
-genTypeToText Generator = "Generator"
-genTypeToText Both      = "Both"
 
 type GenMonad = ReaderT DatatypeMap (Writer Text)
 
@@ -245,13 +239,13 @@ tellGen code comment =
 runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
 
-generateIsoXml :: GenType -> XSD -> Text
-generateIsoXml genType (XSD (e,dm)) =
+generateIsoXml :: Maybe Header -> ModuleName -> GenType -> XSD -> Text
+generateIsoXml mHeader name genType xsd@(XSD (e,dm)) =
   let
     (dList, el) = untwistDeps e dm
-  in (header genType <>) . runGen dm $ do
-      for_ dList $ \(t,dt) ->
-        generateIsoDatatype genType t dt []
+  in (header mHeader name genType <>) . runGen dm $ do
+      for_ dList $ \(t,dt) -> do
+        generateIsoDatatype genType (Just t) dt []
       for_ el (generateIsoRecord genType)
 
 toQualifier :: Int -> Int -> Text
@@ -262,9 +256,10 @@ toQualifier minOc maxOc
   | minOc == 1 && maxOc < minOc = error "maxOccurs < minOccurs"
   | otherwise = "*"
 
-header :: GenType -> Text
-header genType = T.unlines $
-  [ "module Dummy where"
+header :: Maybe Header -> ModuleName -> GenType -> Text
+header mHeader name genType = T.unlines $
+  maybeToList (T.unlines . fmap ("-- " <>) . T.lines <$> mHeader) <>
+  [ "module " <> name <> " where"
   , ""
   , "import Control.DeepSeq"
   , "import Data.THGen.XML"
@@ -450,10 +445,10 @@ generateIsoField
 
 main :: IO ()
 main = do
-  (inFile:mode:_) <- getArgs
-  xml <- BL.readFile inFile
+  Options{..} <- getOptions
+  xml <- BL.readFile oInput
   let
     xsd = case parseXSD def xml of
       Right xsd' -> xsd'
       Left e    -> error $ show e
-  T.hPutStrLn stdout $ generateIsoXml (read mode) xsd
+  T.hPutStrLn stdout $ generateIsoXml oHeader oModule oMode xsd
