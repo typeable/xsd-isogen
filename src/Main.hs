@@ -2,7 +2,9 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
+module Main
+  ( main
+  ) where
 
 import Control.Monad.RWS.CPS (RWS, execRWS)
 import Control.Monad.Reader
@@ -57,15 +59,19 @@ instance References DatatypeRef where
 instance References a => References [a] where
   references = F.concatMap references
 
+-- | 'DatatypeMap' are the types left to process
+-- 'S.Set Text' are the types already processed.
 type PreMonad = StateT (DatatypeMap, S.Set Text) (Writer [(Text, Datatype)])
 
 type PreElemMonad = RWS DatatypeMap [Element] [Element]
 
+-- | Marks the given type as processed.
 proceed :: Text -> Datatype -> PreMonad ()
 proceed t dt = do
   tell [(t, dt)]
   modify $ \(f,s) -> (M.delete t f, S.insert t s)
 
+-- | Marks element as processed.
 proceed' :: Element -> PreElemMonad ()
 proceed' el = do
   tell [el]
@@ -75,7 +81,7 @@ untwistDeps :: [Element] -> DatatypeMap -> ([(Text, Datatype)], [Element])
 untwistDeps e dm = (dList, e')
   where
     dList   = nub $ execWriter $ do
-      (a, (_,s)) <- runStateT sortDatatypesByDeps (dm, S.empty)
+      (a, _) <- runStateT sortDatatypesByDeps (dm, S.empty)
       return a
     (_, e') = execRWS sortElemsByDeps (M.fromList dList) e
 
@@ -89,7 +95,7 @@ sortElemsByDeps = do
       [] -> proceed' first >> sortElemsByDeps
       xs -> do
         results <- traverse memberDatatype xs
-        if L.all id results
+        if L.and results
         then proceed' first >> sortElemsByDeps
         else do
           let failed = fmap snd $ L.filter (not . fst) $ L.zip results xs
@@ -100,12 +106,12 @@ memberDatatype ty = do
   -- traceM $ "memberDatatype: " <> show ty
   dm <- ask
   case M.lookup ty dm of
-    Just typ -> return True
+    Just _ -> return True
     Nothing  -> return False
 
 sortDatatypesByDeps :: PreMonad ()
 sortDatatypesByDeps = do
-  (dm, s) <- get
+  (dm, _) <- get
   if M.null dm then pure () else do
     let first = Prelude.head (M.toList dm)
     traceM $ "sortDatatypesByDeps: " <> show first
@@ -120,12 +126,11 @@ lookupDatatype :: Text -> PreMonad ()
 lookupDatatype ty = do
   traceM $ "lookupDatatype: " <> show ty
   (dm, s) <- get
-  let mTy = M.lookup ty dm
   case M.lookup ty dm of
-    Nothing -> if S.member ty s then pure () else do
+    Nothing -> if S.member ty s then pure () else
       error $ "can't look up datatype: " <> show ty
     Just typ -> case references typ of
-      [] -> proceed ty typ >> sortDatatypesByDeps
+      [] -> proceed ty typ -- >> sortDatatypesByDeps -- Pretty sure this was a bug
       xs -> traverse_ lookupDatatype xs >> proceed ty typ
 
 class Capitalizable t where
@@ -174,19 +179,19 @@ tellGen
   :: [Text] -- generated code
   -> Text   -- comment
   -> GenMonad ()
-tellGen code comment = do
+tellGen code comment =
   tell $ "\n" <> comment <> T.unlines code
 
 runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
 
 generateIsoXml :: GenType -> XSD -> Text
-generateIsoXml genType xsd@(XSD (e,d)) =
+generateIsoXml genType (XSD (e,dm)) =
   let
-    (dList, el) = untwistDeps e d
-  in (header genType <>) . runGen d $ do
-      for_ dList $ \(t,d) -> do
-        generateIsoDatatype genType (Just t) d []
+    (dList, el) = untwistDeps e dm
+  in (header genType <>) . runGen dm $ do
+      for_ dList $ \(t,dt) ->
+        generateIsoDatatype genType t dt []
       for_ el (generateIsoRecord genType)
 
 toQualifier :: Int -> Int -> Text
@@ -230,11 +235,11 @@ typeName (DatatypeRef t)               = Just t
 generateIsoRecord :: GenType -> Element -> GenMonad ()
 generateIsoRecord
   genType
-  (Element (_, laxName) xtype minOc maxOc annotations) = do
+  (Element (_, laxName) elXtype _ _ elAnnotations) = do
     written <- ask
-    case xtype of
+    case elXtype of
       InlineComplex dt ->
-        generateIsoDatatype genType (Just laxName) dt annotations
+        generateIsoDatatype genType laxName dt elAnnotations
       DatatypeRef nam  -> if M.member nam written
         then pure ()
         else error $ "Implementation failure: "
@@ -264,7 +269,7 @@ wrap80 = L.foldl' go [] . T.split (==' ')
     go [] e = [e]
     go l  e =
       let last'    = L.last l
-      in if (T.length last') + T.length e >= 73 -- 80 minus "-- | " and ' '
+      in if T.length last' + T.length e >= 73 -- 80 minus "-- | " and ' '
       then l <> pure e
       else L.init l <> [L.last l <> " " <> e]
 
@@ -321,7 +326,7 @@ generateIsoDatatype
         (quote $ capitalize name)
         (F.concatMap fromEnumeration enums))
       comment
-    else do
+    else
       tellGen (generateNewtype genType iName sat) comment
 
 generateNewtype :: GenType -> Text -> SimpleAtomicType -> [Text]
@@ -349,11 +354,11 @@ generateEnum
   :: Text                -- type name
   -> [Text]              -- enums
   -> [Text]              -- generated code
-generateEnum name enums =
+generateEnum enumName enums =
   let
-   header  = name <> " Exhaustive =:= enum Both"
+   enumHeader  = enumName <> " Exhaustive =:= enum Both"
    eFields = ("& "<>) <$> enums
-  in pure header <> eFields
+  in pure enumHeader <> eFields
 
 -- | Returns Just baseTypeName if type is simple, Nothing - otherwise
 lookupSimpleBaseType
@@ -370,11 +375,11 @@ lookupSimpleType
   :: DatatypeRef
   -> GenMonad (Maybe Text)
 lookupSimpleType (InlineComplex  _) = pure Nothing
-lookupSimpleType (DatatypeRef tyName) = do
-  M.lookup tyName <$> ask >>= \case
+lookupSimpleType (DatatypeRef tyName) =
+  asks (M.lookup tyName) >>= \case
     Just (TypeComplex _)                   -> pure Nothing
     Just (TypeSimple (STAtomic nam _ _ _)) -> pure $ Just nam
-    Nothing                              -> error $ "can't look up type: " <> show tyName
+    Nothing                                -> error $ "can't look up type: " <> show tyName
 
 generateIsoField :: GenType -> Element -> GenMonad Text
 generateIsoField genType (Element (_, name) xtype minOc maxOc annotations) = do
@@ -397,6 +402,6 @@ main = do
   xml <- BL.readFile inFile
   let
     xsd = case parseXSD def xml of
-      Right xsd -> xsd
+      Right xsd' -> xsd'
       Left e    -> error $ show e
   T.hPutStrLn stdout $ generateIsoXml (read mode) xsd
