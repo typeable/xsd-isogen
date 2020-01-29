@@ -11,7 +11,4 @@ Use `xsd-isogen in.xsd Parser > out.hs` for responses.
 
 Use `xsd-isogen in.xsd Both > out.hs` for common definitions.
 
-Keep in mind that name clashes are possible and should be disambiguated
-manually. If you have a good idea how to handle that, feel free to create an
-issue and/or PR. Module name for all auto-generated files is set to `module
-Dummy where`, so it should be updated appropriately as well.
+If there are conflicting field names in some datatypes, one of the the datatype names gets consecutive numbers starting from 2 appended to it (so that the field name prefix changes) until there are no more conflicts.
