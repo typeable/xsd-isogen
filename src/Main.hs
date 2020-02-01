@@ -130,7 +130,7 @@ lookupDatatype ty = do
     Nothing -> if S.member ty s then pure () else
       error $ "can't look up datatype: " <> show ty
     Just typ -> case references typ of
-      [] -> proceed ty typ -- >> sortDatatypesByDeps -- Pretty sure this was a bug
+      [] -> proceed ty typ
       xs -> traverse_ lookupDatatype xs >> proceed ty typ
 
 class Capitalizable t where
