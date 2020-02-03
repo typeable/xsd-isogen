@@ -1,3 +1,6 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+
 module Options
   ( Options(..)
   , optionsParser
@@ -17,7 +20,7 @@ import           Data.List
 
 
 data GenType = Parser | Generator | Both
-  deriving (Read, Show, Bounded, Enum)
+  deriving (Read, Show, Eq, Bounded, Enum)
 
 genTypeToText :: GenType -> Text
 genTypeToText Parser    = "Parser"
@@ -33,6 +36,7 @@ data Options = Options
   , oInput :: FilePath
   , oModule :: ModuleName
   }
+  deriving (Show)
 
 optionsParser :: Parser Options
 optionsParser = Options

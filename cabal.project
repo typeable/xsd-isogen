@@ -2,5 +2,5 @@ packages: .
 
 source-repository-package
       type:     git
-      location: https://github.com/dredozubov/xsd-parser.git
+      location: https://github.com/typeable/xsd-parser.git
       tag: f9cbe65a9b9c37e9015a73707f1cd4f00e79c96e
