@@ -22,7 +22,6 @@ import Data.Text as T
 import Data.Text.IO as T
 import Data.Traversable
 import Debug.Trace
-import System.Environment
 import System.IO
 import Text.XSD
 import Options
@@ -240,12 +239,12 @@ runGen :: DatatypeMap -> GenMonad a -> Text
 runGen dm act = execWriter $ runReaderT act dm
 
 generateIsoXml :: Maybe Header -> ModuleName -> GenType -> XSD -> Text
-generateIsoXml mHeader name genType xsd@(XSD (e,dm)) =
+generateIsoXml mHeader name genType (XSD (e,dm)) =
   let
     (dList, el) = untwistDeps e dm
   in (header mHeader name genType <>) . runGen dm $ do
-      for_ dList $ \(t,dt) -> do
-        generateIsoDatatype genType (Just t) dt []
+      for_ dList $ \(t,dt) ->
+        generateIsoDatatype genType t dt []
       for_ el (generateIsoRecord genType)
 
 toQualifier :: Int -> Int -> Text
@@ -330,7 +329,7 @@ generateIsoDatatype
   genType
   eName
   (TypeComplex (ComplexType _ _ tyAnnotations mGroupSchema))
-  annotationsRec = do
+  annotationsRec =
     case mGroupSchema of
       Just groupSchema -> case groupSchema of
         CTSequence elements -> do
@@ -352,7 +351,6 @@ generateIsoDatatype
   eName
   (TypeSimple ty@(STAtomic iName sat tyAnnotations restrictions))
   annotationsRec = do
-    let eName = eName
     let
       comment                         =
         toComment Haddock $ annotationsRec
