@@ -65,7 +65,6 @@ genType annotations name tp = do
       -- sure they are in scope when xml-isogen quotes them
       -- (stage restriction in TH)
       genDependencies tp
-
       typeName <- makeTypeName name tp
       case tp of
         Xsd.TypeSimple t -> genSimpleType typeName t annotations
@@ -82,22 +81,22 @@ genDependencies a = forM_ (references a) $ \name -> do
 
 genSimpleType :: TypeName -> Xsd.SimpleType -> [Xsd.Annotation]-> Gen ()
 genSimpleType tn (Xsd.AtomicType restriction ann) parentAnn = do
-  let typeName = tnPrefixed tn
-      fieldName = "un" <> typeName
-      baseName r = case Xsd.restrictionBase r of
-        Xsd.Ref n -> Just n
-        Xsd.Inline (Xsd.AtomicType r' _) -> baseName r'
-        Xsd.Inline (Xsd.ListType _ _) -> Nothing
+  let
+    typeName = tnPrefixed tn
+    fieldName = "un" <> typeName
+    baseName r = case Xsd.restrictionBase r of
+      Xsd.Ref n -> Just n
+      Xsd.Inline (Xsd.AtomicType r' _) -> baseName r'
+      Xsd.Inline (Xsd.ListType _ _) -> Nothing
   case baseName restriction of
     Nothing -> genUnsupported tn
     Just base -> do
       fieldTypeName <- resolveTypeName base
-
       mode <- getMode
-      let toxml = case mode of
-            Parser -> ""
-            _ -> ", ToXML"
-
+      let
+        toxml = case mode of
+          Parser -> ""
+          _ -> ", ToXML"
       writeCode $ makeComments tn (parentAnn <> ann)
       writeCode
         [ "newtype " <> typeName
@@ -106,7 +105,6 @@ genSimpleType tn (Xsd.AtomicType restriction ann) parentAnn = do
         , "  } deriving (Show, Eq, NFData" <> toxml <> ")"
         , ""
         ]
-
       unless (mode == Generator) $ writeCode
         [ "instance FromDom " <> typeName <> " where"
         , "  fromDom = " <> typeName <> " <$> fromDom"
@@ -118,8 +116,9 @@ genSimpleType typeName (Xsd.ListType _ _) _ = genUnsupported typeName
 genComplexType :: TypeName -> Xsd.ComplexType -> [Xsd.Annotation] -> Gen ()
 genComplexType typeName t parentAnn = do
   mode <- getMode
-  let header = "\"" <> tnName typeName <> "\" =:= record "
-        <> genTypeToText mode
+  let
+    header = "\"" <> tnName typeName <> "\" =:= record "
+      <> genTypeToText mode
   fields <- maybe (return []) (genFields typeName) (Xsd.complexModelGroup t)
   writeCode $ makeComments typeName
     (parentAnn <> Xsd.complexAnnotations t)

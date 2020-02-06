@@ -93,17 +93,15 @@ makeTypeName :: Xsd.QName -> Xsd.Type -> Gen TypeName
 makeTypeName name tp = go Nothing
   where
   go suffix = do
-    let typeName = capitalize (Xsd.qnName name)
-          <> maybe "" (Text.pack . show) suffix
-        prefixed = "Xml" <> typeName
-
-    let next = case suffix of
-          Nothing -> Just (1 :: Int)
-          Just i -> Just (succ i)
-
+    let
+      typeName = capitalize (Xsd.qnName name)
+        <> maybe "" (Text.pack . show) suffix
+      prefixed = "Xml" <> typeName
+      next = case suffix of
+        Nothing -> Just (1 :: Int)
+        Just i -> Just (succ i)
     bound <- Gen $ gets (Set.member prefixed . gsBoundTypeName)
     duplicateFields <- hasDuplicateFields typeName tp
-
     if bound || duplicateFields
       then go next
       else do
@@ -125,7 +123,6 @@ makeFieldName typeName name = do
   Gen $ modify' $ \s -> s
     { gsBoundFields = Set.insert prefixed (gsBoundFields s)
     }
-
   return (qualifier <> Xsd.qnName name)
   where
   qualifier = maybe ""
