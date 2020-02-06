@@ -82,36 +82,60 @@ genDependencies a = forM_ (references a) $ \name -> do
 genSimpleType :: TypeName -> Xsd.SimpleType -> [Xsd.Annotation]-> Gen ()
 genSimpleType tn (Xsd.AtomicType restriction ann) parentAnn = do
   let
-    typeName = tnPrefixed tn
-    fieldName = "un" <> typeName
     baseName r = case Xsd.restrictionBase r of
       Xsd.Ref n -> Just n
       Xsd.Inline (Xsd.AtomicType r' _) -> baseName r'
       Xsd.Inline (Xsd.ListType _ _) -> Nothing
   case baseName restriction of
-    Nothing -> genUnsupported tn
-    Just base -> do
-      fieldTypeName <- resolveTypeName base
-      mode <- getMode
-      let
-        toxml = case mode of
-          Parser -> ""
-          _ -> ", ToXML"
-      writeCode $ makeComments tn (parentAnn <> ann)
-      writeCode
-        [ "newtype " <> typeName
-        , "  = " <> typeName
-        , "  { " <> fieldName <> " :: " <> fieldTypeName
-        , "  } deriving (Show, Eq, NFData" <> toxml <> ")"
-        , ""
-        ]
-      unless (mode == Generator) $ writeCode
-        [ "instance FromDom " <> typeName <> " where"
-        , "  fromDom = " <> typeName <> " <$> fromDom"
-        , ""
-        ]
-
+    Just _
+      | isEnum restriction
+      -> genEnum tn (Xsd.restrictionConstraints restriction) (parentAnn <> ann)
+    Just base ->
+      genNewtype tn base (parentAnn <> ann)
+    _ -> genUnsupported tn
 genSimpleType typeName (Xsd.ListType _ _) _ = genUnsupported typeName
+
+genNewtype :: TypeName -> Xsd.QName -> [Xsd.Annotation] -> Gen ()
+genNewtype tn base annots = do
+  fieldTypeName <- resolveTypeName base
+  mode <- getMode
+  let
+    typeName = tnPrefixed tn
+    fieldName = "un" <> typeName
+    toxml = case mode of
+      Parser -> ""
+      _ -> ", ToXML"
+  writeCode $ makeComments tn annots
+  writeCode
+    [ "newtype " <> typeName
+    , "  = " <> typeName
+    , "  { " <> fieldName <> " :: " <> fieldTypeName
+    , "  } deriving (Show, Eq, NFData" <> toxml <> ")"
+    , ""
+    ]
+  unless (mode == Generator) $ writeCode
+    [ "instance FromDom " <> typeName <> " where"
+    , "  fromDom = " <> typeName <> " <$> fromDom"
+    , ""
+    ]
+
+genEnum :: TypeName -> [Xsd.Constraint] -> [Xsd.Annotation] -> Gen ()
+genEnum tn constraints annots = do
+  let
+    values = map toValue constraints
+    toValue (Xsd.Enumeration v) = v
+  enumLines <- forM values $ \v -> do
+    enumName <- makeEnumName v
+    return ("  & \"" <> enumName <> "\"")
+  writeCode $ makeComments tn annots
+  writeCode $ "\"" <> tnName tn <> "\" Exhaustive =:= enum Both"
+    : enumLines
+  writeCode [""]
+
+isEnum :: Xsd.Restriction -> Bool
+isEnum = any isEnumConstraint . Xsd.restrictionConstraints
+  where
+  isEnumConstraint (Xsd.Enumeration _) = True
 
 genComplexType :: TypeName -> Xsd.ComplexType -> [Xsd.Annotation] -> Gen ()
 genComplexType typeName t parentAnn = do

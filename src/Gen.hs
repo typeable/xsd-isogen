@@ -15,6 +15,7 @@ module Gen
 , knownTypeName
 , makeTypeName
 , makeFieldName
+, makeEnumName
 )
 where
 
@@ -128,6 +129,12 @@ makeFieldName typeName name = do
   qualifier = maybe ""
     (\(Xsd.Namespace ns) -> "{" <> ns <> "}")
     (Xsd.qnNamespace name)
+
+-- | Make value for enum
+--
+-- We may need to handle duplicate enum values here
+makeEnumName :: Text -> Gen Text
+makeEnumName = return . capitalize
 
 -- | Check whether field name is ambiguous
 hasDuplicateFields :: Text -> Xsd.Type -> Gen Bool
