@@ -13,6 +13,7 @@ module Gen
 , resolveType
 , resolveTypeName
 , knownTypeName
+, extensions
 , makeTypeName
 , makeFieldName
 , makeEnumName
@@ -38,6 +39,8 @@ import Options (GenType(..))
 data GenState = GenState
   { gsTypes :: Map Xsd.QName Xsd.Type
     -- ^ All global types
+  , gsExtensions :: Map Xsd.QName [(Xsd.QName, Xsd.Type)]
+    -- ^ Lift of extension of the specified type
   , gsKnownTypes :: Map Xsd.QName Text
     -- ^ Global types that were already processed and their generated names
   , gsBoundTypeName :: Set Text
@@ -174,6 +177,9 @@ makePrefixedField typeName field = prefix <> Xsd.qnName field
 -- Returns Nothing if the type was not generated yet
 knownTypeName :: Xsd.QName -> Gen (Maybe Text)
 knownTypeName name = Gen $ gets (Map.lookup name . gsKnownTypes)
+
+extensions :: Xsd.QName -> Gen [(Xsd.QName, Xsd.Type)]
+extensions base = Gen $ gets (Map.findWithDefault [] base . gsExtensions)
 
 -- | Returns type for the reference
 resolveType :: Xsd.QName -> Gen Xsd.Type

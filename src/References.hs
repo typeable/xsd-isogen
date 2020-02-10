@@ -50,8 +50,11 @@ instance References Xsd.ComplexContent where
   references Xsd.ComplexContentRestriction = []
 
 instance References Xsd.ComplexExtension where
-  references e = Xsd.complexExtensionBase e
-    : referencesList (Xsd.complexExtensionAttributes e)
+  -- Note that we don't include extension base here
+  -- becase we don't depend on it. And actaully we generate extensions before
+  -- the base because we need to generate the ADT with all the extensions
+  -- at this point.
+  references e = referencesList (Xsd.complexExtensionAttributes e)
     ++ references (Xsd.complexExtensionModel e)
 
 instance References Xsd.Attribute where
