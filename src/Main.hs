@@ -114,6 +114,7 @@ genExtension base = do
       unless (mode == Generator) $ do
         writeCode
           [ "instance FromDom Any" <> baseTypeName <> " where"
+          , "  fromDom _ = undefined"
           , ""
           ]
       unless (mode == Parser) $ do
@@ -133,6 +134,25 @@ genExtension base = do
         clauses <- mapM mkClause types
         writeCode clauses
         writeCode [""]
+        writeCode
+          [ "instance ToXmlParentAttributes Any" <> baseTypeName <> " where"
+          ]
+        let
+          toAttrLine n = do
+            tn <- resolveTypeName n
+            exts' <- extensions n
+            n' <- case exts' of
+              [] -> return (tnPrefixed tn)
+              _ | n == base -> return (tnPrefixed tn)
+              _ -> return ("Any" <> tnPrefixed tn)
+            return
+              [ "  toXmlParentAttributes (The" <> n' <> " a) ="
+              , "    (\"{http://www.w3.org/2001/XMLSchema-instance}type\", \""
+                <> tnName tn <> "\")"
+              , "    : toXmlParentAttributes a"
+              ]
+        attrLines <- mapM toAttrLine (base : map fst types)
+        writeCode (concat attrLines)
 
 genDependencies :: References a => a -> Gen ()
 genDependencies a = forM_ (references a) $ \name -> do
@@ -349,11 +369,12 @@ genHeader opts = do
     ]
   where
   imports = case oMode opts of
-    Generator -> [ xmlWriter ]
+    Generator -> [ xmlWriter, parentAttr ]
     Parser    -> [ domParser ]
-    Both      -> [ domParser, xmlWriter ]
-  xmlWriter = "import Text.XML.Writer"
-  domParser = "import Text.XML.DOM.Parser.FromDom"
+    Both      -> [ domParser, xmlWriter, parentAttr ]
+  xmlWriter  = "import Text.XML.Writer"
+  parentAttr = "import Text.XML.ParentAttributes"
+  domParser  = "import Text.XML.DOM.Parser.FromDom"
 
 -- | We populate the initial state with all built-in types to make sure
 -- they will be correctly resolved
