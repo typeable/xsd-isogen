@@ -85,14 +85,14 @@ genExtension base = do
     [] -> return ()
     types -> do
       mapM_ (uncurry genTopType) types
-      baseTypeName <- resolveTypeName base
+      baseTypeName <- tnPrefixed <$> resolveTypeName base
       writeCode
         [ "data Any" <> baseTypeName
         , "  = The" <> baseTypeName <> " !" <> baseTypeName
         ]
       let
         mkConstructor (n, _) = do
-          tn <- resolveTypeName n
+          tn <- tnPrefixed <$> resolveTypeName n
           exts' <- extensions n
           let
             n' = case exts' of
@@ -123,7 +123,7 @@ genExtension base = do
           ]
         let
           mkClause (n, _) = do
-            tn <- resolveTypeName n
+            tn <- tnPrefixed <$> resolveTypeName n
             exts' <- extensions n
             let
               n' = case exts' of
@@ -161,7 +161,7 @@ genSimpleType typeName (Xsd.ListType _ _) _ = genUnsupported typeName
 
 genNewtype :: TypeName -> Xsd.QName -> [Xsd.Annotation] -> Gen ()
 genNewtype tn base annots = do
-  fieldTypeName <- resolveTypeName base
+  fieldTypeName <- tnPrefixed <$> resolveTypeName base
   mode <- getMode
   let
     typeName = tnPrefixed tn
@@ -263,14 +263,14 @@ genField typeName e = do
 
   fieldTypeName <- case Xsd.elementType e of
     Xsd.Ref name -> do
-      tn <- resolveTypeName name
+      tn <- tnPrefixed <$> resolveTypeName name
       exts <- extensions name
       case exts of
         [] -> return tn
         _ -> return ("Any" <> tn)
     Xsd.Inline t -> do
       genType (Xsd.elementAnnotations e) (Xsd.elementName e) t
-      resolveTypeName (Xsd.elementName e)
+      tnPrefixed <$> resolveTypeName (Xsd.elementName e)
 
   qualifier <- makeQualifier (Xsd.elementOccurs e)
 

@@ -41,7 +41,7 @@ data GenState = GenState
     -- ^ All global types
   , gsExtensions :: Map Xsd.QName [(Xsd.QName, Xsd.Type)]
     -- ^ Lift of extension of the specified type
-  , gsKnownTypes :: Map Xsd.QName Text
+  , gsKnownTypes :: Map Xsd.QName TypeName
     -- ^ Global types that were already processed and their generated names
   , gsBoundTypeName :: Set Text
     -- ^ prefixed names that were already used
@@ -109,15 +109,17 @@ makeTypeName name tp = go Nothing
     if bound || duplicateFields
       then go next
       else do
+        let
+          tn = TypeName
+            { tnName = typeName
+            , tnPrefixed = prefixed
+            , tnQName = name
+            }
         Gen $ modify' $ \s -> s
-          { gsKnownTypes = Map.insert name prefixed (gsKnownTypes s)
+          { gsKnownTypes = Map.insert name tn (gsKnownTypes s)
           , gsBoundTypeName = Set.insert prefixed (gsBoundTypeName s)
           }
-        return TypeName
-          { tnName = typeName
-          , tnPrefixed = prefixed
-          , tnQName = name
-          }
+        return tn
 
 makeFieldName :: TypeName -> Xsd.QName -> Gen Text
 makeFieldName typeName name = do
@@ -175,7 +177,7 @@ makePrefixedField typeName field = prefix <> Xsd.qnName field
 -- | Get generated name for the type name
 --
 -- Returns Nothing if the type was not generated yet
-knownTypeName :: Xsd.QName -> Gen (Maybe Text)
+knownTypeName :: Xsd.QName -> Gen (Maybe TypeName)
 knownTypeName name = Gen $ gets (Map.lookup name . gsKnownTypes)
 
 extensions :: Xsd.QName -> Gen [(Xsd.QName, Xsd.Type)]
@@ -192,7 +194,7 @@ resolveType name = do
 -- | Returns type type for the reference
 --
 -- It should already be generated
-resolveTypeName :: Xsd.QName -> Gen Text
+resolveTypeName :: Xsd.QName -> Gen TypeName
 resolveTypeName name = knownTypeName name
   >>= maybe (genError ("unresolved type: " <> show name)) return
 
