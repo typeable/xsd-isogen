@@ -147,11 +147,18 @@ hasDuplicateFields typeName tp = do
 -- | Get all fields from the type
 allFields :: Xsd.Type -> [Xsd.QName]
 allFields (Xsd.TypeSimple _) = []
-allFields (Xsd.TypeComplex t) = do
-  case Xsd.complexModelGroup t of
-    Nothing -> []
-    Just (Xsd.Sequence es) -> map Xsd.elementName es
-    _ -> []
+allFields (Xsd.TypeComplex t) =
+  case Xsd.complexContent t of
+    Xsd.ContentPlain c ->
+      case Xsd.plainContentModel c of
+        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        _ -> []
+    Xsd.ContentSimple _ -> []
+    Xsd.ContentComplex (Xsd.ComplexContentExtension e) ->
+      case Xsd.complexExtensionModel e of
+        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        _ -> []
+    Xsd.ContentComplex Xsd.ComplexContentRestriction -> []
 
 -- | Prefix field name with based on the type name
 makePrefixedField :: Text -> Xsd.QName -> Text

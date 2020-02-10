@@ -143,7 +143,7 @@ genComplexType typeName t parentAnn = do
   let
     header = "\"" <> tnName typeName <> "\" =:= record "
       <> genTypeToText mode
-  fields <- maybe (return []) (genFields typeName) (Xsd.complexModelGroup t)
+  fields <- genFields typeName (Xsd.complexContent t)
   writeCode $ makeComments typeName
     (parentAnn <> Xsd.complexAnnotations t)
   writeCode [header]
@@ -168,13 +168,22 @@ makeComments typeName annotations =
 -- | Generate code for record fields
 --
 -- The first argument - record name
-genFields :: TypeName -> Xsd.ModelGroup -> Gen [Text]
-genFields typeName (Xsd.Sequence elements) =
+genFields :: TypeName -> Xsd.Content -> Gen [Text]
+genFields typeName (Xsd.ContentPlain c) =
+  maybe (return []) (genFieldsForModel typeName) (Xsd.plainContentModel c)
+genFields _ (Xsd.ContentSimple _) = return []
+genFields typeName (Xsd.ContentComplex (Xsd.ComplexContentExtension e)) =
+  maybe (return []) (genFieldsForModel typeName) (Xsd.complexExtensionModel e)
+genFields _ (Xsd.ContentComplex Xsd.ComplexContentRestriction) =
+  return []
+
+genFieldsForModel :: TypeName -> Xsd.ModelGroup -> Gen [Text]
+genFieldsForModel typeName (Xsd.Sequence elements) =
   catMaybes <$> mapM (genField typeName) elements
-genFields _ (Xsd.Choice _) = do
+genFieldsForModel _ (Xsd.Choice _) = do
   warn "choice: not implemented"
   return []
-genFields _ (Xsd.All _) = do
+genFieldsForModel _ (Xsd.All _) = do
   warn "all: not implemented"
   return []
 
