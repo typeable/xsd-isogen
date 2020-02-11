@@ -324,13 +324,18 @@ genField typeName e = do
 
   qualifier <- makeQualifier (Xsd.elementOccurs e)
 
+  let
+    fieldType = if Xsd.elementNillable e
+      then "Nillable " <> fieldTypeName
+      else fieldTypeName
+
   return $ Just $ mconcat
     [ "  "
     , qualifier
     , " \""
     , fieldName
     , "\" [t|"
-    , fieldTypeName
+    , fieldType
     , "|]"
     ]
 
