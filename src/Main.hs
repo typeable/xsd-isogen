@@ -391,7 +391,8 @@ genHeader opts = do
       writeCode [""]
 
   writeCode
-    [ "module " <> oModule opts <> " where"
+    [ "{-# OPTIONS_GHC -Wno-unused-imports #-}"
+    , "module " <> oModule opts <> " where"
     , ""
     , "import Control.DeepSeq"
     , "import Data.Scientific"
