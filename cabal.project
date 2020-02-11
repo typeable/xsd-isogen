@@ -3,4 +3,4 @@ packages: .
 source-repository-package
       type:     git
       location: https://github.com/typeable/xsd-parser.git
-      tag: a4402933fcdba6648b91b3f1e8d85a9c327c26e7
+      tag: be6f2e92d3c6b381922957fa51821e8e57840da3
