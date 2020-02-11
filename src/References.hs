@@ -31,8 +31,31 @@ instance References t => References (Xsd.RefOr t) where
   references (Xsd.Inline t) = references t
 
 instance References Xsd.ComplexType where
-  references t = referencesList (Xsd.complexAttributes t)
-    ++ references (Xsd.complexModelGroup t)
+  references t = references (Xsd.complexContent t)
+
+instance References Xsd.Content where
+  references (Xsd.ContentComplex c) = references c
+  references (Xsd.ContentSimple c) = references c
+  references (Xsd.ContentPlain c) = references c
+
+instance References Xsd.PlainContent where
+  references t = referencesList (Xsd.plainContentAttributes t)
+    ++ references (Xsd.plainContentModel t)
+
+instance References Xsd.SimpleContent where
+  references _ = []
+
+instance References Xsd.ComplexContent where
+  references (Xsd.ComplexContentExtension e) = references e
+  references Xsd.ComplexContentRestriction = []
+
+instance References Xsd.ComplexExtension where
+  -- Note that we don't include extension base here
+  -- becase we don't depend on it. And actaully we generate extensions before
+  -- the base because we need to generate the ADT with all the extensions
+  -- at this point.
+  references e = referencesList (Xsd.complexExtensionAttributes e)
+    ++ references (Xsd.complexExtensionModel e)
 
 instance References Xsd.Attribute where
   references = references . Xsd.attrType

@@ -13,6 +13,7 @@ module Gen
 , resolveType
 , resolveTypeName
 , knownTypeName
+, extensions
 , makeTypeName
 , makeFieldName
 , makeEnumName
@@ -38,7 +39,9 @@ import Options (GenType(..))
 data GenState = GenState
   { gsTypes :: Map Xsd.QName Xsd.Type
     -- ^ All global types
-  , gsKnownTypes :: Map Xsd.QName Text
+  , gsExtensions :: Map Xsd.QName [(Xsd.QName, Xsd.Type)]
+    -- ^ Lift of extension of the specified type
+  , gsKnownTypes :: Map Xsd.QName TypeName
     -- ^ Global types that were already processed and their generated names
   , gsBoundTypeName :: Set Text
     -- ^ prefixed names that were already used
@@ -106,15 +109,17 @@ makeTypeName name tp = go Nothing
     if bound || duplicateFields
       then go next
       else do
+        let
+          tn = TypeName
+            { tnName = typeName
+            , tnPrefixed = prefixed
+            , tnQName = name
+            }
         Gen $ modify' $ \s -> s
-          { gsKnownTypes = Map.insert name prefixed (gsKnownTypes s)
+          { gsKnownTypes = Map.insert name tn (gsKnownTypes s)
           , gsBoundTypeName = Set.insert prefixed (gsBoundTypeName s)
           }
-        return TypeName
-          { tnName = typeName
-          , tnPrefixed = prefixed
-          , tnQName = name
-          }
+        return tn
 
 makeFieldName :: TypeName -> Xsd.QName -> Gen Text
 makeFieldName typeName name = do
@@ -147,11 +152,18 @@ hasDuplicateFields typeName tp = do
 -- | Get all fields from the type
 allFields :: Xsd.Type -> [Xsd.QName]
 allFields (Xsd.TypeSimple _) = []
-allFields (Xsd.TypeComplex t) = do
-  case Xsd.complexModelGroup t of
-    Nothing -> []
-    Just (Xsd.Sequence es) -> map Xsd.elementName es
-    _ -> []
+allFields (Xsd.TypeComplex t) =
+  case Xsd.complexContent t of
+    Xsd.ContentPlain c ->
+      case Xsd.plainContentModel c of
+        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        _ -> []
+    Xsd.ContentSimple _ -> []
+    Xsd.ContentComplex (Xsd.ComplexContentExtension e) ->
+      case Xsd.complexExtensionModel e of
+        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        _ -> []
+    Xsd.ContentComplex Xsd.ComplexContentRestriction -> []
 
 -- | Prefix field name with based on the type name
 makePrefixedField :: Text -> Xsd.QName -> Text
@@ -165,8 +177,11 @@ makePrefixedField typeName field = prefix <> Xsd.qnName field
 -- | Get generated name for the type name
 --
 -- Returns Nothing if the type was not generated yet
-knownTypeName :: Xsd.QName -> Gen (Maybe Text)
+knownTypeName :: Xsd.QName -> Gen (Maybe TypeName)
 knownTypeName name = Gen $ gets (Map.lookup name . gsKnownTypes)
+
+extensions :: Xsd.QName -> Gen [(Xsd.QName, Xsd.Type)]
+extensions base = Gen $ gets (Map.findWithDefault [] base . gsExtensions)
 
 -- | Returns type for the reference
 resolveType :: Xsd.QName -> Gen Xsd.Type
@@ -179,7 +194,7 @@ resolveType name = do
 -- | Returns type type for the reference
 --
 -- It should already be generated
-resolveTypeName :: Xsd.QName -> Gen Text
+resolveTypeName :: Xsd.QName -> Gen TypeName
 resolveTypeName name = knownTypeName name
   >>= maybe (genError ("unresolved type: " <> show name)) return
 

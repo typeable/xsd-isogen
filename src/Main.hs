@@ -9,6 +9,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import Data.Maybe
+import qualified Data.List as List
 import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -37,20 +38,26 @@ data Result = Result
 
 generate :: Options -> Xsd.Schema -> Either String Result
 generate opts schema = do
-  s <- runGen (initialGenState opts schema) $ do
+  let
+    types = Map.union (Xsd.schemaTypes schema)
+      (elementsToTypes (Xsd.schemaElements schema))
+  s <- runGen (initialGenState opts types) $ do
     genHeader opts
-    genTypes (Xsd.schemaTypes schema)
-    genElements (Xsd.schemaElements schema)
+    genTypes types
   Right Result
     { resultCode = Text.unlines (reverse (gsCode s))
     , resultWarnings = reverse (gsWarnings s)
     }
 
+elementsToTypes :: Map Xsd.QName Xsd.Element -> Map Xsd.QName Xsd.Type
+elementsToTypes = List.foldl' step Map.empty . Map.toList
+  where
+  step types (_, e) = case Xsd.elementType e of
+    Xsd.Ref _ -> types
+    Xsd.Inline t -> Map.insert (Xsd.elementName e) t types
+
 genTypes :: Map Xsd.QName Xsd.Type -> Gen ()
 genTypes types = mapM_ (uncurry genTopType) . Map.toList $ types
-
-genElements :: Map Xsd.QName Xsd.Element -> Gen ()
-genElements = mapM_ genElement
 
 genTopType :: Xsd.QName -> Xsd.Type -> Gen ()
 genTopType = genType []
@@ -69,6 +76,105 @@ genType annotations name tp = do
       case tp of
         Xsd.TypeSimple t -> genSimpleType typeName t annotations
         Xsd.TypeComplex t -> genComplexType typeName t annotations
+      genExtension name
+
+genExtension :: Xsd.QName -> Gen ()
+genExtension base = do
+  exts <- extensions base
+  case exts of
+    [] -> return ()
+    types -> do
+      mapM_ (uncurry genTopType) types
+      baseTypeName <- tnPrefixed <$> resolveTypeName base
+      writeCode
+        [ "data Any" <> baseTypeName
+        , "  = The" <> baseTypeName <> " !" <> baseTypeName
+        ]
+      let
+        mkConstructor (n, _) = do
+          tn <- tnPrefixed <$> resolveTypeName n
+          exts' <- extensions n
+          let
+            n' = case exts' of
+              [] -> tn
+              _ -> "Any" <> tn
+          return ("  | The" <> n' <> " !" <> n')
+      constructors <- mapM mkConstructor types
+      writeCode constructors
+      writeCode
+        [ "  deriving (Eq, Show)"
+        , ""
+        ]
+      writeCode
+        [ "instance NFData Any" <> baseTypeName <> " where"
+        , "  rnf = rwhnf"
+        , " "
+        ]
+      mode <- getMode
+      unless (mode == Generator) $ do
+        writeCode
+          [ "instance FromDom Any" <> baseTypeName <> " where"
+          , "  fromDom = do"
+          , "    tp <- parseAttribute"
+          , "      (matchName " <>
+            "\"{http://www.w3.org/2001/XMLSchema-instance}type\")"
+          , "      Right"
+          , "    case tp of"
+          ]
+        let
+          mkClause n = do
+            tn <- resolveTypeName n
+            exts' <- extensions n
+            n' <- case exts' of
+              [] -> return (tnPrefixed tn)
+              _ | n == base -> return (tnPrefixed tn)
+              _ -> return ("Any" <> tnPrefixed tn)
+            return $ mconcat
+              [ "      \""
+              , tnName tn
+              , "\" -> The"
+              , n'
+              , " <$> fromDom"
+              ]
+        clauses <- mapM mkClause (base : map fst types)
+        writeCode clauses
+        writeCode [""]
+      unless (mode == Parser) $ do
+        writeCode
+          [ "instance ToXML Any" <> baseTypeName <> " where"
+          , "  toXML (The" <> baseTypeName <> " a) = toXML a"
+          ]
+        let
+          mkClause (n, _) = do
+            tn <- tnPrefixed <$> resolveTypeName n
+            exts' <- extensions n
+            let
+              n' = case exts' of
+                [] -> tn
+                _ -> "Any" <> tn
+            return ("  toXML (The" <> n' <> " a) = toXML a")
+        clauses <- mapM mkClause types
+        writeCode clauses
+        writeCode [""]
+        writeCode
+          [ "instance ToXmlParentAttributes Any" <> baseTypeName <> " where"
+          ]
+        let
+          toAttrLine n = do
+            tn <- resolveTypeName n
+            exts' <- extensions n
+            n' <- case exts' of
+              [] -> return (tnPrefixed tn)
+              _ | n == base -> return (tnPrefixed tn)
+              _ -> return ("Any" <> tnPrefixed tn)
+            return
+              [ "  toXmlParentAttributes (The" <> n' <> " a) ="
+              , "    (\"{http://www.w3.org/2001/XMLSchema-instance}type\", \""
+                <> tnName tn <> "\")"
+              , "    : toXmlParentAttributes a"
+              ]
+        attrLines <- mapM toAttrLine (base : map fst types)
+        writeCode (concat attrLines)
 
 genDependencies :: References a => a -> Gen ()
 genDependencies a = forM_ (references a) $ \name -> do
@@ -97,7 +203,7 @@ genSimpleType typeName (Xsd.ListType _ _) _ = genUnsupported typeName
 
 genNewtype :: TypeName -> Xsd.QName -> [Xsd.Annotation] -> Gen ()
 genNewtype tn base annots = do
-  fieldTypeName <- resolveTypeName base
+  fieldTypeName <- tnPrefixed <$> resolveTypeName base
   mode <- getMode
   let
     typeName = tnPrefixed tn
@@ -143,7 +249,7 @@ genComplexType typeName t parentAnn = do
   let
     header = "\"" <> tnName typeName <> "\" =:= record "
       <> genTypeToText mode
-  fields <- maybe (return []) (genFields typeName) (Xsd.complexModelGroup t)
+  fields <- genFields typeName (Xsd.complexContent t)
   writeCode $ makeComments typeName
     (parentAnn <> Xsd.complexAnnotations t)
   writeCode [header]
@@ -168,13 +274,28 @@ makeComments typeName annotations =
 -- | Generate code for record fields
 --
 -- The first argument - record name
-genFields :: TypeName -> Xsd.ModelGroup -> Gen [Text]
-genFields typeName (Xsd.Sequence elements) =
+genFields :: TypeName -> Xsd.Content -> Gen [Text]
+genFields typeName (Xsd.ContentPlain c) =
+  maybe (return []) (genFieldsForModel typeName) (Xsd.plainContentModel c)
+genFields _ (Xsd.ContentSimple _) = return []
+genFields typeName (Xsd.ContentComplex (Xsd.ComplexContentExtension e)) = do
+  base <- resolveType (Xsd.complexExtensionBase e)
+  baseFields <- case base of
+    Xsd.TypeComplex t -> genFields typeName (Xsd.complexContent t)
+    _ -> return []
+  fields <- maybe (return []) (genFieldsForModel typeName)
+    (Xsd.complexExtensionModel e)
+  return (baseFields ++ fields)
+genFields _ (Xsd.ContentComplex Xsd.ComplexContentRestriction) =
+  return []
+
+genFieldsForModel :: TypeName -> Xsd.ModelGroup -> Gen [Text]
+genFieldsForModel typeName (Xsd.Sequence elements) =
   catMaybes <$> mapM (genField typeName) elements
-genFields _ (Xsd.Choice _) = do
+genFieldsForModel _ (Xsd.Choice _) = do
   warn "choice: not implemented"
   return []
-genFields _ (Xsd.All _) = do
+genFieldsForModel _ (Xsd.All _) = do
   warn "all: not implemented"
   return []
 
@@ -183,10 +304,15 @@ genField typeName e = do
   fieldName <- makeFieldName typeName (Xsd.elementName e)
 
   fieldTypeName <- case Xsd.elementType e of
-    Xsd.Ref name -> resolveTypeName name
+    Xsd.Ref name -> do
+      tn <- tnPrefixed <$> resolveTypeName name
+      exts <- extensions name
+      case exts of
+        [] -> return tn
+        _ -> return ("Any" <> tn)
     Xsd.Inline t -> do
       genType (Xsd.elementAnnotations e) (Xsd.elementName e) t
-      resolveTypeName (Xsd.elementName e)
+      tnPrefixed <$> resolveTypeName (Xsd.elementName e)
 
   qualifier <- makeQualifier (Xsd.elementOccurs e)
 
@@ -243,11 +369,6 @@ genUnsupported tn = do
     , ""
     ]
 
-genElement :: Xsd.Element -> Gen ()
-genElement e = case Xsd.elementType e of
-  Xsd.Ref _ -> return ()
-  Xsd.Inline t -> genType (Xsd.elementAnnotations e) (Xsd.elementName e) t
-
 genHeader :: Options -> Gen ()
 genHeader opts = do
   case oHeader opts of
@@ -270,17 +391,19 @@ genHeader opts = do
     ]
   where
   imports = case oMode opts of
-    Generator -> [ xmlWriter ]
+    Generator -> [ xmlWriter, parentAttr ]
     Parser    -> [ domParser ]
-    Both      -> [ domParser, xmlWriter ]
-  xmlWriter = "import Text.XML.Writer"
-  domParser = "import Text.XML.DOM.Parser.FromDom"
+    Both      -> [ domParser, xmlWriter, parentAttr ]
+  xmlWriter  = "import Text.XML.Writer"
+  parentAttr = "import Text.XML.ParentAttributes"
+  domParser  = "import Text.XML.DOM.Parser"
 
 -- | We populate the initial state with all built-in types to make sure
 -- they will be correctly resolved
-initialGenState :: Options -> Xsd.Schema -> GenState
-initialGenState opts schema = GenState
-  { gsTypes = Xsd.schemaTypes schema
+initialGenState :: Options -> Map Xsd.QName Xsd.Type -> GenState
+initialGenState opts types = GenState
+  { gsTypes = types
+  , gsExtensions = collectExtensions types
   , gsKnownTypes = builtInTypes
   , gsBoundTypeName = Set.empty
   , gsBoundFields = Set.empty
@@ -288,3 +411,17 @@ initialGenState opts schema = GenState
   , gsCode = []
   , gsWarnings = []
   }
+
+collectExtensions
+  :: Map Xsd.QName Xsd.Type
+  -> Map Xsd.QName [(Xsd.QName, Xsd.Type)]
+collectExtensions = List.foldl' step Map.empty . Map.toList
+  where
+  step exts (n, t) = case baseOf t of
+    Nothing -> exts
+    Just base -> Map.insertWith (++) base [(n, t)] exts
+  baseOf (Xsd.TypeSimple _) = Nothing
+  baseOf (Xsd.TypeComplex t) = case Xsd.complexContent t of
+    Xsd.ContentComplex (Xsd.ComplexContentExtension e) ->
+      Just (Xsd.complexExtensionBase e)
+    _ -> Nothing

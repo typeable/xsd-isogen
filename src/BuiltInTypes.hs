@@ -5,13 +5,14 @@ module BuiltInTypes
 )
 where
 
-import Data.Text (Text)
 import Data.Map (Map)
 import qualified Data.Map as Map
 
 import qualified Xsd
 
-builtInTypes :: Map Xsd.QName Text
+import Gen
+
+builtInTypes :: Map Xsd.QName TypeName
 builtInTypes = Map.fromList . map qualify $
   [ ("anyURI", "Text")
   , ("base64Binary", "ByteString")
@@ -56,4 +57,11 @@ builtInTypes = Map.fromList . map qualify $
   ]
   where
   qualify (n, t) =
-    ( Xsd.QName (Just (Xsd.Namespace Xsd.schemaNamespace)) n, t)
+    let
+      tn = TypeName
+        { tnName = t
+        , tnPrefixed = t
+        , tnQName = qname
+        }
+      qname = Xsd.QName (Just (Xsd.Namespace Xsd.schemaNamespace)) n
+    in (qname, tn)
