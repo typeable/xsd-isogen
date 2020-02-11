@@ -381,6 +381,7 @@ genHeader opts = do
     [ "module " <> oModule opts <> " where"
     , ""
     , "import Control.DeepSeq"
+    , "import Data.Scientific"
     , "import Data.THGen.XML"
     ]
   writeCode imports
