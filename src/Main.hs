@@ -257,15 +257,23 @@ genComplexType typeName t parentAnn = do
   writeCode [""]
 
 makeComments :: TypeName -> [Xsd.Annotation] -> [Text]
-makeComments typeName annotations =
-  [ "{-"
-  , "Generated from: " <> prefix <> name
-  , ""
-  ] <> map makeDoc annotations <>
-  [ "-}"
-  , ""
-  ]
+makeComments typeName annotations = if null annotations
+  then
+    [ "{-|"
+    , generated
+    , "-}"
+    , ""
+    ]
+  else
+    [ "{-|"
+    , generated
+    , ""
+    ] <> map makeDoc annotations <>
+    [ "-}"
+    , ""
+    ]
   where
+  generated = "Generated from: " <> prefix <> name
   qname = tnQName typeName
   name = Xsd.qnName qname
   prefix = maybe "" ((<> ":") . Xsd.fromNamespace) (Xsd.qnNamespace qname)
