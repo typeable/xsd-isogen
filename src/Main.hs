@@ -114,9 +114,31 @@ genExtension base = do
       unless (mode == Generator) $ do
         writeCode
           [ "instance FromDom Any" <> baseTypeName <> " where"
-          , "  fromDom _ = undefined"
-          , ""
+          , "  fromDom = do"
+          , "    tp <- parseAttribute"
+          , "      (matchName " <>
+            "\"{http://www.w3.org/2001/XMLSchema-instance}type\")"
+          , "      Right"
+          , "    case tp of"
           ]
+        let
+          mkClause n = do
+            tn <- resolveTypeName n
+            exts' <- extensions n
+            n' <- case exts' of
+              [] -> return (tnPrefixed tn)
+              _ | n == base -> return (tnPrefixed tn)
+              _ -> return ("Any" <> tnPrefixed tn)
+            return $ mconcat
+              [ "      \""
+              , tnName tn
+              , "\" -> The"
+              , n'
+              , " <$> fromDom"
+              ]
+        clauses <- mapM mkClause (base : map fst types)
+        writeCode clauses
+        writeCode [""]
       unless (mode == Parser) $ do
         writeCode
           [ "instance ToXML Any" <> baseTypeName <> " where"
@@ -374,7 +396,7 @@ genHeader opts = do
     Both      -> [ domParser, xmlWriter, parentAttr ]
   xmlWriter  = "import Text.XML.Writer"
   parentAttr = "import Text.XML.ParentAttributes"
-  domParser  = "import Text.XML.DOM.Parser.FromDom"
+  domParser  = "import Text.XML.DOM.Parser"
 
 -- | We populate the initial state with all built-in types to make sure
 -- they will be correctly resolved
