@@ -307,8 +307,9 @@ genFieldsForModel _ (Xsd.All _) = do
   warn "all: not implemented"
   return []
 
-genField :: TypeName -> Xsd.Element -> Gen (Maybe Text)
-genField typeName e = do
+genField :: TypeName -> Xsd.RefOr Xsd.Element -> Gen (Maybe Text)
+genField _ (Xsd.Ref _) = return Nothing
+genField typeName (Xsd.Inline e) = do
   fieldName <- makeFieldName typeName (Xsd.elementName e)
 
   fieldTypeName <- case Xsd.elementType e of

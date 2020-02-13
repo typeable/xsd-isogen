@@ -23,6 +23,7 @@ where
 import qualified Data.Char as Char
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map (Map)
@@ -156,14 +157,18 @@ allFields (Xsd.TypeComplex t) =
   case Xsd.complexContent t of
     Xsd.ContentPlain c ->
       case Xsd.plainContentModel c of
-        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        Just (Xsd.Sequence es) -> mapMaybe elementName es
         _ -> []
     Xsd.ContentSimple _ -> []
     Xsd.ContentComplex (Xsd.ComplexContentExtension e) ->
       case Xsd.complexExtensionModel e of
-        Just (Xsd.Sequence es) -> map Xsd.elementName es
+        Just (Xsd.Sequence es) -> mapMaybe elementName es
         _ -> []
     Xsd.ContentComplex Xsd.ComplexContentRestriction -> []
+  where
+  elementName = Xsd.refOr
+    (const Nothing)
+    (Just . Xsd.elementName)
 
 -- | Prefix field name with based on the type name
 makePrefixedField :: Text -> Xsd.QName -> Text
