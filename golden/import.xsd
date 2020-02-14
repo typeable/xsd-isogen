@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<xs:schema
+	xmlns:xs="http://www.w3.org/2001/XMLSchema"
+	xmlns:my="uri:my"
+	xmlns:my1="uri:my1"
+	targetNamespace="uri:my1"
+	>
+	<xs:import schemaLocation="imported.xsd" namespace="uri:my"/>
+	<xs:element name="person"> 
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="name" type="my:stringtype"/> 
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+</xs:schema>

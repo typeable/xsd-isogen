@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  	<xs:simpleType name="stringtype">
+		<xs:annotation>
+			<xs:documentation>Blah</xs:documentation>
+		</xs:annotation>
+  		<xs:restriction base="xs:string"/>
+	</xs:simpleType>
+	<xs:element name="name" type="stringtype"/> 
+	<xs:element name="a"> 
+		<xs:annotation>
+			<xs:documentation>A blah</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="a" type="stringtype"/> 
+				<xs:element name="b" minOccurs="1" type="stringtype"/> 
+				<xs:element name="c" minOccurs="0" maxOccurs="1" type="stringtype"/> 
+				<xs:element name="d" minOccurs="1" maxOccurs="2" type="stringtype"/> 
+				<xs:element name="e" minOccurs="1" maxOccurs="unbounded" type="stringtype"/> 
+				<xs:element name="f" type="xs:decimal"/> 
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+</xs:schema>

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  	<xs:simpleType name="stringtype">
+  		<xs:restriction base="xs:string"/>
+	</xs:simpleType>
+	<xs:complexType name="Aa">
+		<xs:sequence>
+			<xs:element name="firstName" type="stringtype"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="Ab">
+		<xs:sequence>
+			<xs:element name="firstName" type="stringtype"/>
+		</xs:sequence>
+	</xs:complexType>
+</xs:schema>

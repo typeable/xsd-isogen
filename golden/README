@@ -1,0 +1,3 @@
+To use the golden tests, cd to this folder and run test.sh. It will run
+xsd-isogen on each xsd file here. Then use git diff to check the
+difference.

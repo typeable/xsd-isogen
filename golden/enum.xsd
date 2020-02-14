@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  	<xs:simpleType name="stringtype">
+		<xs:annotation>
+			<xs:documentation>Blah</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="day"/>
+			<xs:enumeration value="night"/>
+		</xs:restriction>
+	</xs:simpleType>
+</xs:schema>

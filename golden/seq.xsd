@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+	<xs:simpleType name="str">
+		<xs:restriction base="xs:string"/>
+	</xs:simpleType>
+	<xs:element name="customer"> 
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="firstName" type="str"/>
+				<xs:element name="lastName" type="str"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+</xs:schema>
