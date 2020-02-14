@@ -18,7 +18,6 @@ Generated from: stringtype
 
 Blah
 -}
-
 "Stringtype" Exhaustive =:= enum Both
   & "Day"
   & "Night"

@@ -262,7 +262,6 @@ makeComments typeName annotations = if null annotations
     [ "{-|"
     , generated
     , "-}"
-    , ""
     ]
   else
     [ "{-|"
@@ -270,7 +269,6 @@ makeComments typeName annotations = if null annotations
     , ""
     ] <> map makeDoc annotations <>
     [ "-}"
-    , ""
     ]
   where
   generated = "Generated from: " <> prefix <> name

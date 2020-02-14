@@ -18,7 +18,6 @@ Generated from: stringtype
 
 Blah
 -}
-
 newtype XmlStringtype
   = XmlStringtype
   { unXmlStringtype :: Text
@@ -30,7 +29,6 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: a
 -}
-
 "A" =:= record Both
   ! "a" [t|XmlStringtype|]
   ! "b" [t|XmlStringtype|]

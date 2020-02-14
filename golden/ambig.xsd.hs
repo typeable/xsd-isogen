@@ -16,7 +16,6 @@ import Prelude hiding ((*), (+))
 {-|
 Generated from: stringtype
 -}
-
 newtype XmlStringtype
   = XmlStringtype
   { unXmlStringtype :: Text
@@ -28,14 +27,12 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: Aa
 -}
-
 "Aa" =:= record Both
   ! "firstName" [t|XmlStringtype|]
 
 {-|
 Generated from: Ab
 -}
-
 "Ab1" =:= record Both
   ! "firstName" [t|XmlStringtype|]
 

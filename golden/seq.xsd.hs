@@ -16,7 +16,6 @@ import Prelude hiding ((*), (+))
 {-|
 Generated from: str
 -}
-
 newtype XmlStr
   = XmlStr
   { unXmlStr :: Text
@@ -28,7 +27,6 @@ instance FromDom XmlStr where
 {-|
 Generated from: customer
 -}
-
 "Customer" =:= record Both
   ! "firstName" [t|XmlStr|]
   ! "lastName" [t|XmlStr|]

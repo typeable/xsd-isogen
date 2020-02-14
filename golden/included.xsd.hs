@@ -16,7 +16,6 @@ import Prelude hiding ((*), (+))
 {-|
 Generated from: stringtype
 -}
-
 newtype XmlStringtype
   = XmlStringtype
   { unXmlStringtype :: Text
