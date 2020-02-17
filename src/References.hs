@@ -22,9 +22,13 @@ instance References Xsd.Type where
 instance References Xsd.SimpleType where
   references (Xsd.AtomicType r _) = references r
   references (Xsd.ListType r _) = references r
+  references (Xsd.UnionType rs _) = referencesList rs
 
-instance References Xsd.Restriction where
-  references r = references (Xsd.restrictionBase r)
+instance References Xsd.SimpleRestriction where
+  references r = references (Xsd.simpleRestrictionBase r)
+
+instance References Xsd.ComplexRestriction where
+  references r = [Xsd.complexRestrictionBase r]
 
 instance References t => References (Xsd.RefOr t) where
   references (Xsd.Ref r) = [r]
@@ -47,7 +51,7 @@ instance References Xsd.SimpleContent where
 
 instance References Xsd.ComplexContent where
   references (Xsd.ComplexContentExtension e) = references e
-  references Xsd.ComplexContentRestriction = []
+  references (Xsd.ComplexContentRestriction r) = references r
 
 instance References Xsd.ComplexExtension where
   -- Note that we don't include extension base here
@@ -58,7 +62,14 @@ instance References Xsd.ComplexExtension where
     ++ references (Xsd.complexExtensionModel e)
 
 instance References Xsd.Attribute where
-  references = references . Xsd.attrType
+  references (Xsd.RefAttribute a) = references a
+  references (Xsd.InlineAttribute a) = references a
+
+instance References Xsd.AttributeRef where
+  references a = [Xsd.attributeRefRef a]
+
+instance References Xsd.AttributeInline where
+  references = references . Xsd.attributeInlineType
 
 instance References Xsd.ModelGroup where
   references (Xsd.Sequence elements) = referencesList elements

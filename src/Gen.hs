@@ -164,7 +164,7 @@ allFields (Xsd.TypeComplex t) =
       case Xsd.complexExtensionModel e of
         Just (Xsd.Sequence es) -> mapMaybe elementName es
         _ -> []
-    Xsd.ContentComplex Xsd.ComplexContentRestriction -> []
+    Xsd.ContentComplex (Xsd.ComplexContentRestriction _) -> []
   where
   elementName = Xsd.refOr
     (const Nothing)

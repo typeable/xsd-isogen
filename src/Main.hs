@@ -188,18 +188,22 @@ genDependencies a = forM_ (references a) $ \name -> do
 genSimpleType :: TypeName -> Xsd.SimpleType -> [Xsd.Annotation]-> Gen ()
 genSimpleType tn (Xsd.AtomicType restriction ann) parentAnn = do
   let
-    baseName r = case Xsd.restrictionBase r of
+    baseName r = case Xsd.simpleRestrictionBase r of
       Xsd.Ref n -> Just n
       Xsd.Inline (Xsd.AtomicType r' _) -> baseName r'
       Xsd.Inline (Xsd.ListType _ _) -> Nothing
+      Xsd.Inline (Xsd.UnionType _ _) -> Nothing
   case baseName restriction of
     Just _
       | isEnum restriction
-      -> genEnum tn (Xsd.restrictionConstraints restriction) (parentAnn <> ann)
+      -> genEnum tn
+        (Xsd.simpleRestrictionConstraints restriction)
+        (parentAnn <> ann)
     Just base ->
       genNewtype tn base (parentAnn <> ann)
     _ -> genUnsupported tn
 genSimpleType typeName (Xsd.ListType _ _) _ = genUnsupported typeName
+genSimpleType typeName (Xsd.UnionType _ _) _ = genUnsupported typeName
 
 genNewtype :: TypeName -> Xsd.QName -> [Xsd.Annotation] -> Gen ()
 genNewtype tn base annots = do
@@ -238,8 +242,8 @@ genEnum tn constraints annots = do
     : enumLines
   writeCode [""]
 
-isEnum :: Xsd.Restriction -> Bool
-isEnum = any isEnumConstraint . Xsd.restrictionConstraints
+isEnum :: Xsd.SimpleRestriction -> Bool
+isEnum = any isEnumConstraint . Xsd.simpleRestrictionConstraints
   where
   isEnumConstraint (Xsd.Enumeration _) = True
 
@@ -292,7 +296,7 @@ genFields typeName (Xsd.ContentComplex (Xsd.ComplexContentExtension e)) = do
   fields <- maybe (return []) (genFieldsForModel typeName)
     (Xsd.complexExtensionModel e)
   return (baseFields ++ fields)
-genFields _ (Xsd.ContentComplex Xsd.ComplexContentRestriction) =
+genFields _ (Xsd.ContentComplex (Xsd.ComplexContentRestriction _)) =
   return []
 
 genFieldsForModel :: TypeName -> Xsd.ModelGroup -> Gen [Text]
