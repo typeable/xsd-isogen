@@ -16,20 +16,20 @@ import Prelude hiding ((*), (+))
 {-|
 Generated from: basetype
 -}
-"Basetype" =:= record Both
+"Basetype" =:= record ParserAndGenerator
   ! "a" [t|Text|]
 
 {-|
 Generated from: ext2
 -}
-"Ext2" =:= record Both
+"Ext2" =:= record ParserAndGenerator
   ! "a" [t|Text|]
   ! "c" [t|Integer|]
 
 {-|
 Generated from: ext1
 -}
-"Ext1" =:= record Both
+"Ext1" =:= record ParserAndGenerator
   ! "a" [t|Text|]
   ! "b" [t|Integer|]
 
@@ -70,13 +70,13 @@ instance ToXmlParentAttributes AnyXmlBasetype where
 {-|
 Generated from: other
 -}
-"Other" =:= record Both
+"Other" =:= record ParserAndGenerator
   ! "a" [t|AnyXmlBasetype|]
 
 {-|
 Generated from: some
 -}
-"Some" =:= record Both
+"Some" =:= record ParserAndGenerator
   ! "a" [t|Text|]
 
 

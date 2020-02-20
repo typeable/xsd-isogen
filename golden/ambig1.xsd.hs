@@ -27,13 +27,13 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: Aa
 -}
-"Aa" =:= record Both
+"Aa" =:= record ParserAndGenerator
   ! "firstName" [t|XmlStringtype|]
 
 {-|
 Generated from: Ab
 -}
-"Ab1" =:= record Both
+"Ab1" =:= record ParserAndGenerator
   ! "firstName" [t|XmlStringtype|]
 
 

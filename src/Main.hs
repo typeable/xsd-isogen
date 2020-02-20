@@ -231,6 +231,7 @@ genNewtype tn base annots = do
 
 genEnum :: TypeName -> [Xsd.Constraint] -> [Xsd.Annotation] -> Gen ()
 genEnum tn constraints annots = do
+  mode <- getMode
   let
     values = map toValue constraints
     toValue (Xsd.Enumeration v) = v
@@ -238,8 +239,8 @@ genEnum tn constraints annots = do
     enumName <- makeEnumName v
     return ("  & \"" <> enumName <> "\"")
   writeCode $ makeComments tn annots
-  writeCode $ "\"" <> tnName tn <> "\" Exhaustive =:= enum Both"
-    : enumLines
+  writeCode $ "\"" <> tnName tn <> "\" Exhaustive =:= enum "
+    <> genTypeToText mode : enumLines
   writeCode [""]
 
 isEnum :: Xsd.SimpleRestriction -> Bool
@@ -409,9 +410,9 @@ genHeader opts = do
     ]
   where
   imports = case oMode opts of
-    Generator -> [ xmlWriter, parentAttr ]
-    Parser    -> [ domParser ]
-    Both      -> [ domParser, xmlWriter, parentAttr ]
+    Generator          -> [ xmlWriter, parentAttr ]
+    Parser             -> [ domParser ]
+    ParserAndGenerator -> [ domParser, xmlWriter, parentAttr ]
   xmlWriter  = "import Text.XML.Writer"
   parentAttr = "import Text.XML.ParentAttributes"
   domParser  = "import Text.XML.DOM.Parser"

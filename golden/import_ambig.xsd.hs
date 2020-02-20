@@ -27,7 +27,7 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: uri:my1:AaBb
 -}
-"AaBb" =:= record Both
+"AaBb" =:= record ParserAndGenerator
   ! "{uri:my1}name" [t|XmlStringtype|]
 
 {-|
@@ -44,7 +44,7 @@ instance FromDom XmlStringtype1 where
 {-|
 Generated from: uri:my1:AaBc
 -}
-"AaBc1" =:= record Both
+"AaBc1" =:= record ParserAndGenerator
   ! "{uri:my1}name" [t|XmlStringtype1|]
 
 

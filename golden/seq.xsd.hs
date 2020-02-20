@@ -27,7 +27,7 @@ instance FromDom XmlStr where
 {-|
 Generated from: customer
 -}
-"Customer" =:= record Both
+"Customer" =:= record ParserAndGenerator
   ! "firstName" [t|XmlStr|]
   ! "lastName" [t|XmlStr|]
 

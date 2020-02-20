@@ -29,7 +29,7 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: a
 -}
-"A" =:= record Both
+"A" =:= record ParserAndGenerator
   ! "a" [t|XmlStringtype|]
   ! "b" [t|XmlStringtype|]
   ? "c" [t|XmlStringtype|]

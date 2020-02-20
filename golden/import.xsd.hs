@@ -27,7 +27,7 @@ instance FromDom XmlStringtype where
 {-|
 Generated from: uri:my1:person
 -}
-"Person" =:= record Both
+"Person" =:= record ParserAndGenerator
   ! "{uri:my1}name" [t|XmlStringtype|]
 
 

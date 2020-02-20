@@ -18,7 +18,7 @@ Generated from: stringtype
 
 Blah
 -}
-"Stringtype" Exhaustive =:= enum Both
+"Stringtype" Exhaustive =:= enum ParserAndGenerator
   & "Day"
   & "Night"
 
