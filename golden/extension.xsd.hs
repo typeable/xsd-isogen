@@ -51,6 +51,7 @@ instance FromDom AnyXmlBasetype where
       "Basetype" -> TheXmlBasetype <$> fromDom
       "Ext2" -> TheXmlExt2 <$> fromDom
       "Ext1" -> TheXmlExt1 <$> fromDom
+      _ -> throwParserError (PEOther "Unexpected type")
 
 instance ToXML AnyXmlBasetype where
   toXML (TheXmlBasetype a) = toXML a

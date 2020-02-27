@@ -138,7 +138,10 @@ genExtension base = do
               ]
         clauses <- mapM mkClause (base : map fst types)
         writeCode clauses
-        writeCode [""]
+        writeCode
+          [ "      _ -> throwParserError (PEOther \"Unexpected type\")"
+          , ""
+          ]
       unless (mode == Parser) $ do
         writeCode
           [ "instance ToXML Any" <> baseTypeName <> " where"
