@@ -19,13 +19,13 @@ import           Paths_xsd_isogen    (version)
 import           Data.List
 
 
-data GenType = Parser | Generator | Both
+data GenType = Parser | Generator | ParserAndGenerator
   deriving (Read, Show, Eq, Bounded, Enum)
 
 genTypeToText :: GenType -> Text
-genTypeToText Parser    = "Parser"
-genTypeToText Generator = "Generator"
-genTypeToText Both      = "Both"
+genTypeToText Parser             = "Parser"
+genTypeToText Generator          = "Generator"
+genTypeToText ParserAndGenerator = "ParserAndGenerator"
 
 type ModuleName = Text
 type Header = Text
@@ -54,7 +54,7 @@ optionsParser = Options
   <*> option auto
     ( long "mode"
     <> short 'm'
-    <> value Both
+    <> value ParserAndGenerator
     <> help ("Whether to generate both parsers and generators. One of: "
       <> (mconcat . intersperse ", " . fmap show
         $ [minBound @GenType .. maxBound]) <> ".")
