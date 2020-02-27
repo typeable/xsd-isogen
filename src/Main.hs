@@ -139,7 +139,7 @@ genExtension base = do
         clauses <- mapM mkClause (base : map fst types)
         writeCode clauses
         writeCode
-          [ "      _ -> fail \"unexpected type\""
+          [ "      _ -> throwParserError (PEOther \"unexpected type\")"
           , ""
           ]
       unless (mode == Parser) $ do
