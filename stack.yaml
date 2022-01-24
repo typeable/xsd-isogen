@@ -1,0 +1,12 @@
+#resolver: nightly-2022-01-24
+resolver: lts-18.23
+
+packages:
+- .
+
+extra-deps:
+- git: https://github.com/typeable/xsd-parser
+  commit: 648877d94d03a58dc9114f68d4e99c674e353fca
+
+nix:
+  packages: [zlib]
