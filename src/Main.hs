@@ -294,6 +294,7 @@ genFields typeName (Xsd.ContentPlain c) =
 genFields _ (Xsd.ContentSimple _) = return []
 genFields typeName (Xsd.ContentComplex (Xsd.ComplexContentExtension e)) = do
   base <- resolveType (Xsd.complexExtensionBase e)
+  genDependencies base
   baseFields <- case base of
     Xsd.TypeComplex t -> genFields typeName (Xsd.complexContent t)
     _ -> return []
